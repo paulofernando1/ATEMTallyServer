@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="ASCII">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tally Light setup</title>
+</head>
+
+<script>
+    function switchIpField(e) {
+        console.log("switch");
+        console.log(e);
+        var target = e.srcElement || e.target;
+        var maxLength = parseInt(target.attributes["maxlength"].value, 10);
+        var myLength = target.value.length;
+        if (myLength >= maxLength) {
+            var next = target.nextElementSibling;
+            if (next != null) {
+                if (next.className.includes("IP")) {
+                    next.focus();
+                }
+            }
+        } else if (myLength == 0) {
+            var previous = target.previousElementSibling;
+            if (previous != null) {
+                if (previous.className.includes("IP")) {
+                    previous.focus();
+                }
+            }
+        }
+    }
+
+    function ipFieldFocus(e) {
+        console.log("focus");
+        console.log(e);
+        var target = e.srcElement || e.target;
+        target.select();
+    }
+
+    function load() {
+        var containers = document.getElementsByClassName("IP");
+        for (var i = 0; i < containers.length; i++) {
+            var container = containers[i];
+            container.oninput = switchIpField;
+            container.onfocus = ipFieldFocus;
+        }
+        containers = document.getElementsByClassName("tIP");
+        for (var i = 0; i < containers.length; i++) {
+            var container = containers[i];
+            container.oninput = switchIpField;
+            container.onfocus = ipFieldFocus;
+        }
+        toggleStaticIPFields();
+    }
+
+    function toggleStaticIPFields() {
+        var enabled = document.getElementById("staticIP").checked;
+        document.getElementById("staticIPHidden").disabled = enabled;
+        var staticIpFields = document.getElementsByClassName('tIP');
+        for (var i = 0; i < staticIpFields.length; i++) {
+            staticIpFields[i].disabled = !enabled;
+        }
+    }
+</script>
+
+<style>
+    a {
+        color: #0F79E0
+    }
+</style>
+
+<body style="font-family:Verdana; white-space:nowrap;" onload="load()">
+    <table cellpadding="2" style="width:100%">
+        <tr bgcolor="#777777" style="color:#ffffff;font-size:.8em;">
+            <td colspan="3">
+                <h1>&nbsp;Tally Light setup</h1>
+                <h2>&nbsp;Status:</h2>
+            </td>
+        </tr>
+        <tr>
+            <td><br></td>
+            <td></td>
+            <td style="width: 100%;"></td>
+        </tr>
+        <tr>
+            <td>Connection Status:</td>
+            <td colspan="2">@</td>
+        </tr>
+        <tr>
+            <td>Network name (SSID):</td>
+            <td colspan="2">@</td>
+        </tr>
+        <tr>
+            <td><br></td>
+        </tr>
+        <tr>
+            <td>Signal strength:</td>
+            <td colspan="2">@ dBm</td>
+        </tr>
+        <tr>
+            <td><br></td>
+        </tr>
+        <tr>
+            <td>Battery voltage:</td>
+            <td colspan="2">@ V</td>
+        </tr>
+        <tr>
+            <td>Static IP:</td>
+            <td colspan="2">@</td>
+        </tr>
+        <tr>
+            <td>Tally Light IP:</td>
+            <td colspan="2">@</td>
+        </tr>
+        <tr>
+            <td>Subnet mask: </td>
+            <td colspan="2">@</td>
+        </tr>
+        <tr>
+            <td>Gateway: </td>
+            <td colspan="2">@</td>
+        </tr>
+        <tr>
+            <td><br></td>
+        </tr>
+        <tr>
+            <td>ATEM switcher status:</td>
+            <td colspan="2">@</td>
+        </tr>
+        <tr>
+            <td>ATEM switcher IP:</td>
+            <td colspan="2">@</td>
+        </tr>
+        <tr>
+            <td><br></td>
+        </tr>
+        <tr bgcolor="#777777" style="color:#ffffff;font-size:.8em;">
+            <td colspan="3">
+                <h2>&nbsp;Settings:</h2>
+            </td>
+        </tr>
+        <tr>
+            <td><br></td>
+        </tr>
+        <form action="/save" method="post">
+            <tr>
+                <td>Tally Light name: </td>
+                <td>
+                    <input type="text" size="30" maxlength="30" name="tName" value="@" required />
+                </td>
+            </tr>
+            <tr>
+                <td><br></td>
+            </tr>
+            <tr>
+                <td>Tally Light number: </td>
+                <td>
+                    <input type="number" size="5" min="1" max="41" name="tNo" value="@" required />
+                </td>
+            </tr>
+            <tr>
+                <td>Tally Light mode (LED 1):&nbsp;</td>
+                <td>
+                    <select name="tModeLED1">
+                        <option value="@">Normal</option>
+                        <option value="@">Preview stay on</option>
+                        <option value="@">Program only</option>
+                        <option value="@">On Air</option>
+                    </select>
+                </td>
+            </tr>
+            <tr>
+                <td>Tally Light mode (LED 2):</td>
+                <td>
+                    <select name="tModeLED2">
+                        <option value="@">Normal</option>
+                        <option value="@">Preview stay on</option>
+                        <option value="@">Program only</option>
+                        <option value="@">On Air</option>
+                    </select>
+                </td>
+            </tr>
+            <tr>
+                <td>Led brightness: </td>
+                <td>
+                    <input type="number" size="5" min="0" max="255" name="ledBright" value="@" required/>
+                </td>
+            </tr>
+            <tr>
+                <td><br></td>
+            </tr>
+            <tr>
+                <td>Amount of Neopixels:</td>
+                <td>
+                    <input type="number" size="5" min="0" max="1000" name="neoPxAmount" value="@" required />
+                </td>
+            </tr>
+            <tr>
+                <td>Neopixel status LED: </td>
+                <td>
+                    <select name="neoPxStatus">
+                        <option value="@">First LED</option>
+                        <option value="@">Last LED</option>
+                        <option value="@">None</option>
+                    </select>
+                </td>
+            </tr>
+            <tr>
+                <td>Neopixel brightness:</td>
+                <td>
+                    <input type="number" size="5" min="0" max="255" name="neoPxBright" value="@" required />
+                </td>
+            </tr>
+            <tr>
+                <td><br></td>
+            </tr>
+            <tr>
+                <td>Network name (SSID): </td>
+                <td>
+                    <input type="text" size="30" maxlength="30" name="ssid" value="@" required />
+                </td>
+            </tr>
+            <tr>
+                <td>Network password: </td>
+                <td>
+                    <input type="password" size="30" maxlength="30" name="pwd" pattern="^$|.{8,32}" value="@" />
+                </td>
+            </tr>
+            <tr>
+                <td><br></td>
+            </tr>
+            <tr>
+                <td>Use static IP: </td>
+                <td>
+                    <input id="staticIPHidden" type="hidden" name="staticIP" value="false" />
+                    <input id="staticIP" type="checkbox" name="staticIP" value="true" onchange="toggleStaticIPFields()"
+                        @ />
+                </td>
+            </tr>
+            <tr>
+                <td>Tally Light IP: </td>
+                <td>
+                    <input class="tIP" type="text" size="3" maxlength="3" name="tIP1" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="tIP2" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="tIP3" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="tIP4" pattern="\d{0,3}" value="@"
+                        required />
+                </td>
+            </tr>
+            <tr>
+                <td>Subnet mask: </td>
+                <td>
+                    <input class="tIP" type="text" size="3" maxlength="3" name="mask1" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="mask2" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="mask3" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="mask4" pattern="\d{0,3}" value="@"
+                        required />
+                </td>
+            </tr>
+            <tr>
+                <td>Gateway: </td>
+                <td>
+                    <input class="tIP" type="text" size="3" maxlength="3" name="gate1" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="gate2" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="gate3" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="tIP" type="text" size="3" maxlength="3" name="gate4" pattern="\d{0,3}" value="@"
+                        required />
+                </td>
+            </tr>
+            <tr>
+                <td><br></td>
+            </tr>
+            <tr>
+                <td>ATEM switcher IP: </td>
+                <td>
+                    <input class="IP" type="text" size="3" maxlength="3" name="aIP1" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="IP" type="text" size="3" maxlength="3" name="aIP2" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="IP" type="text" size="3" maxlength="3" name="aIP3" pattern="\d{0,3}" value="@"
+                        required />.
+                    <input class="IP" type="text" size="3" maxlength="3" name="aIP4" pattern="\d{0,3}" value="@"
+                        required />
+            </tr>
+            <tr>
+                <td><br></td>
+            </tr>
+            <tr>
+                <td />
+                <td style="float: right;">
+                    <input type="submit" value="Save Changes" />
+                </td>
+            </tr>
+        </form>
+        <td><br></td>
+        <tr bgcolor="#cccccc" style="font-size:.8em;">
+            <td colspan="3">
+                <p>&nbsp;&copy; 2021 <a href="https://aronhetlam.github.io/">Aron N. Het Lam</a></p>
+                <p>&nbsp;Based on ATEM libraries for Arduino by <a href="https://www.skaarhoj.com/">SKAARHOJ</a></p>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>
