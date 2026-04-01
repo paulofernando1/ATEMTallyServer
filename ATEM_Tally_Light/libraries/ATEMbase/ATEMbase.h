@@ -109,7 +109,7 @@ class ATEMbase
 	bool hasInitialized();
 	bool isRejected();
 	void setTallyID(uint8_t id) { _tallyID = id; }
-	void sendRepeaterClients(IPAddress* clients, uint8_t count);
+	void sendRepeaterClients(IPAddress* clients, int8_t* roles, uint8_t count);
 
   	void serialOutput(uint8_t level);
 	bool hasTimedOut(unsigned long time, unsigned long timeout);

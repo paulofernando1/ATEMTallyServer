@@ -1,22 +1,14 @@
 /*
-Copyright (C) 2023 Aron N. Het Lam, aronhetlam@gmail.com
-
-This file is a part of the Tally Sever library for use with Kasper Skårhøj's
-(<https://skaarhoj.com>) ATEM client libraries for Arduino.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
+ * ==============================================================================
+ * TallyServer Implementation - Core UDP Engine
+ * ==============================================================================
+ * Manages the binary UDP protocol (Port 9910).
+ * Handles:
+ * - Session Management (12-byte headers)
+ * - Packet Acknowledgement (ACK/RESEND)
+ * - Tally Client State Tracking
+ * ==============================================================================
+ */
 
 #include "TallyServer.h"
 
@@ -176,6 +168,14 @@ void TallyServer::runLoop() {
                         if (flags & TALLY_SERVER_FLAG_HELLO) {//Respond to first hello packet.
                             _resetBuffer();
                             client->_sessionID = random(1, 32767); // Assign non-zero random session ID
+                            
+                            // Discover Tally ID from hello packet (offset 13)
+                            if (packetLen >= 20) {
+                                uint8_t helloPayload[8];
+                                _udp.read(helloPayload, 8);
+                                client->_tallyID = (int8_t)helloPayload[1]; // Offset 13 in the full packet (13 - 12 = 1)
+                            }
+                            
                             _createHeader(client, TALLY_SERVER_FLAG_HELLO, 20);
                             _buffer[12] = TALLY_SERVER_CONNECTION_ACCEPTED;
                             _sendBuffer(client, 20);
@@ -320,7 +320,7 @@ void TallyServer::runLoop() {
  * Set the number of tally sources to send to clients. Must be less than TALLY_SERVER_MAX_TALLY_FLAGS.
  */
 void TallyServer::setTallySources(uint8_t tallySources) {
-    if(tallySources < TALLY_SERVER_MAX_TALLY_FLAGS)
+    if(tallySources <= TALLY_SERVER_MAX_TALLY_FLAGS)
         _atemTallySources = tallySources;
 }
 
@@ -469,6 +469,7 @@ void TallyServer::_resetClient(TallyClient *client) {
     client->_localPacketIdCounter = 0;
     client->_lastRemotePacketID = 0;
     client->_sessionID = 0;
+    client->_tallyID = -1;
 }
 
 /**

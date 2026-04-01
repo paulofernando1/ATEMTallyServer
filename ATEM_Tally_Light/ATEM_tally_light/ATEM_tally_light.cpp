@@ -541,22 +541,32 @@ void loop() {
         }
       }
 
-      // --- REPEATER CLIENT REPORTING ---
+#endif
+
+      // --- REPEATER CLIENT REPORTING (High Reliability) ---
+      // Every 5 seconds, if this unit is a repeater, it reports its connected sub-clients
+      // back to the main server. We now include the Roles (Tally IDs) for each sub-client
+      // so the server dashboard can accurately display status orbs for them.
       if (millis() - lastRepeaterReportMillis >= 5000) {
         lastRepeaterReportMillis = millis();
         int maxC = tallyServer.getMaxClients();
-        IPAddress clients[5]; // Standard max clients
+        IPAddress clients[5]; // Standard max capacity for repeater report buffer
+        int8_t roles[5];      // Sub-client Tally IDs (Roles)
         uint8_t count = 0;
         for (int i = 0; i < maxC && count < 5; i++) {
           if (tallyServer.isClientConnected(i)) {
-            clients[count++] = tallyServer.getClientIP(i);
+            clients[count] = tallyServer.getClientIP(i);
+            roles[count] = tallyServer.getClientTallyID(i);
+            count++;
           }
         }
         if (count > 0) {
-          atemSwitcher.sendRepeaterClients(clients, count);
+          // Send expanded Clnt packet [IP:4, Role:1, PAD:3]
+          atemSwitcher.sendRepeaterClients(clients, roles, count);
         }
       }
-#else
+
+#ifndef TALLY_TEST_SERVER
       //Handle data exchange and connection to swithcher
       atemSwitcher.runLoop();
 

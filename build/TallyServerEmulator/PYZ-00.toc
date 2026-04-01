@@ -1,5 +1,5 @@
-('C:\\Dropbox\\Bibliotecas Arquivos\\AntiGravity\\Tally '
- 'Server\\build\\TallyServerEmulator\\PYZ-00.pyz',
+('C:\\Dropbox\\Bibliotecas '
+ 'Arquivos\\AntiGravity\\ATEMTallyServer\\build\\TallyServerEmulator\\PYZ-00.pyz',
  [('__future__', 'C:\\Python314\\Lib\\__future__.py', 'PYMODULE'),
   ('_aix_support', 'C:\\Python314\\Lib\\_aix_support.py', 'PYMODULE'),
   ('_ast_unparse', 'C:\\Python314\\Lib\\_ast_unparse.py', 'PYMODULE'),
@@ -1115,8 +1115,8 @@
   ('netrc', 'C:\\Python314\\Lib\\netrc.py', 'PYMODULE'),
   ('numbers', 'C:\\Python314\\Lib\\numbers.py', 'PYMODULE'),
   ('obs_client',
-   'C:\\Dropbox\\Bibliotecas Arquivos\\AntiGravity\\Tally '
-   'Server\\obs_client.py',
+   'C:\\Dropbox\\Bibliotecas '
+   'Arquivos\\AntiGravity\\ATEMTallyServer\\obs_client.py',
    'PYMODULE'),
   ('obsws_python',
    'C:\\Users\\Paulo\\AppData\\Roaming\\Python\\Python314\\site-packages\\obsws_python\\__init__.py',
@@ -1788,8 +1788,8 @@
   ('subprocess', 'C:\\Python314\\Lib\\subprocess.py', 'PYMODULE'),
   ('sysconfig', 'C:\\Python314\\Lib\\sysconfig\\__init__.py', 'PYMODULE'),
   ('tally_server',
-   'C:\\Dropbox\\Bibliotecas Arquivos\\AntiGravity\\Tally '
-   'Server\\tally_server.py',
+   'C:\\Dropbox\\Bibliotecas '
+   'Arquivos\\AntiGravity\\ATEMTallyServer\\tally_server.py',
    'PYMODULE'),
   ('tarfile', 'C:\\Python314\\Lib\\tarfile.py', 'PYMODULE'),
   ('tempfile', 'C:\\Python314\\Lib\\tempfile.py', 'PYMODULE'),
@@ -1952,8 +1952,8 @@
    'PYMODULE'),
   ('uuid', 'C:\\Python314\\Lib\\uuid.py', 'PYMODULE'),
   ('vmix_client',
-   'C:\\Dropbox\\Bibliotecas Arquivos\\AntiGravity\\Tally '
-   'Server\\vmix_client.py',
+   'C:\\Dropbox\\Bibliotecas '
+   'Arquivos\\AntiGravity\\ATEMTallyServer\\vmix_client.py',
    'PYMODULE'),
   ('webbrowser', 'C:\\Python314\\Lib\\webbrowser.py', 'PYMODULE'),
   ('websocket',

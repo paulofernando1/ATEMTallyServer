@@ -1,9 +1,17 @@
+# ==============================================================================
+# vMix Tally Client - TCP Interface
+# ==============================================================================
+# This module connects to vMix via the TCP Protocol on Port 8099.
+# It subscribes to "TALLY" updates and parses them into Program/Preview states.
+# ==============================================================================
+
 import socket
 import threading
 import time
 
 class VmixTallyClient:
     def __init__(self, host, port, on_tally_update):
+        # ...
         self.host = host
         self.port = port
         self.on_tally_update = on_tally_update

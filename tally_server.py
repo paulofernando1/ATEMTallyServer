@@ -1,29 +1,38 @@
+# ==============================================================================
+# Tally Server Pro - Core UDP Protocol Engine
+# ==============================================================================
+# This module implements the binary UDP protocol for ATEM Tally communication.
+# Protocol Features:
+# - HELLO Handshake for session initialization.
+# - ACK/RESEND mechanisms for reliable UDP delivery.
+# - Paging/Padding for 4-byte architecture alignment (ESP8266/ESP32).
+# - Role-Aware Repeater Reporting (8-byte Clnt records).
+# ==============================================================================
+
 import socket
 import threading
 import time
 
-# --- HISTORY OF CHANGES & STABILITY FIXES ---
-# 1. 41-SOURCE SUPPORT: Increased atem_tally_sources to 41 to support Remote Display/I2C (Indices 8-40).
-# 2. PROTOCOL PADDING: Implemented 4-byte alignment/padding in _create_tally_data_cmd for ESP8266 compatibility.
-# 3. BUFFER EXPANSION: Increased flag buffer to 256 bytes to prevent overflows with large source counts.
-# 4. REMOTE DISPLAY: Added dedicated logic for Display Mode (index 8-15) and Message Buffer (16-40).
-# --------------------------------------------
-
+# --- PROTOCOL FLAGS ---
 TALLY_SERVER_FLAG_ACK               = 0b10000000
 TALLY_SERVER_FLAG_RESEND_REQUEST    = 0b01000000
 TALLY_SERVER_FLAG_RESENT_PACKAGE    = 0b00100000
 TALLY_SERVER_FLAG_HELLO             = 0b00010000
 TALLY_SERVER_FLAG_ACK_REQUEST       = 0b00001000
 
+# --- CONNECTION STATES ---
 TALLY_SERVER_CONNECTION_REQUEST     = 1
 TALLY_SERVER_CONNECTION_ACCEPTED    = 2
 TALLY_SERVER_CONNECTION_REJECTED    = 3
 TALLY_SERVER_CONNECTION_LOST        = 4
 
-TALLY_SERVER_MAX_TALLY_FLAGS        = 100
-TALLY_SERVER_BUFFER_LENGTH          = 144
+TALLY_SERVER_MAX_TALLY_FLAGS        = 128
+TALLY_SERVER_BUFFER_LENGTH          = 256
 TALLY_SERVER_KEEP_ALIVE_MSG_INTERVAL= 1.5 # seconds
 
+# ------------------------------------------------------------------------------
+# TallyClient: Tracks the network state and session of a single UDP hardware unit
+# ------------------------------------------------------------------------------
 class TallyClient:
     def __init__(self, ip, port):
         self.ip = ip
@@ -39,19 +48,18 @@ class TallyClient:
         self.tally_id = -1
 
 class TallyServer:
-    def __init__(self, port=9910, max_clients=10, on_client_update=None, on_repeater_detected=None):
+    def __init__(self, port=9910, max_clients=100, on_client_update=None, on_repeater_detected=None):
         self.port = port
         self.max_clients = max_clients
         self.on_client_update = on_client_update
         self.on_repeater_detected = on_repeater_detected
         self.sock = None
         self.clients = []
-        self.atem_tally_sources = 41 # Default to 41 for Remote Display support
-        self.atem_tally_flags = bytearray(256) # Buffer for up to 256 flags
+        self.atem_tally_sources = 120 # Support up to 120 sources (Tallies + Display + Message)
+        self.atem_tally_flags = bytearray(256) 
         self.run_thread = None
         self.repeater_clients = {} # Parent IP -> List of Child IPs
         self.tally_flags_changed = False
-        self.repeater_clients = {} # Parent IP -> List of Child IPs
         self.running = False
         self.thread = None
 
@@ -198,13 +206,15 @@ class TallyServer:
                                         cmd_name = data[ptr+4:ptr+8].decode('ascii', errors='ignore')
                                         if cmd_name == 'Clnt':
                                             count = data[ptr+9]
-                                            ips = []
+                                            ips_with_roles = []
+                                            # New Format: 8 bytes per client [IP:4, Role:1, PAD:3]
                                             for i in range(count):
-                                                s = ptr + 10 + (i * 4)
-                                                if s + 4 <= ptr + cmd_len:
+                                                s = ptr + 10 + (i * 8)
+                                                if s + 5 <= ptr + cmd_len:
                                                     ip_str = f"{data[s]}.{data[s+1]}.{data[s+2]}.{data[s+3]}"
-                                                    ips.append(ip_str)
-                                            self.repeater_clients[client.ip] = ips
+                                                    role = int(data[s+4])
+                                                    ips_with_roles.append((ip_str, role))
+                                            self.repeater_clients[client.ip] = ips_with_roles
                                             if self.on_repeater_detected: self.on_repeater_detected(client.ip)
                                             if self.on_client_update: self.on_client_update()
                                     except: pass

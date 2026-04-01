@@ -1,3 +1,15 @@
+# ==============================================================================
+# OBS Tally Client - WebSocket 5.x Bridge
+# ==============================================================================
+# This module connects to OBS Studio using the Websocket-python client.
+# It monitors 'CurrentProgramSceneChanged' and 'CurrentPreviewSceneChanged'
+# to automatically update hardware tally flags.
+#
+# Logic: 
+# 1. Sync Program/Preview scenes.
+# 2. Map those scenes (and their composite inputs) back to Cam IDs.
+# ==============================================================================
+
 import threading
 import time
 from obsws_python import EventClient
