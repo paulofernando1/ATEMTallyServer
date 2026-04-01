@@ -4,7 +4,7 @@ Tally Server Pro is a professional-grade, multi-protocol tally server designed f
 
 ![Version](https://img.shields.io/badge/Status-V1.0.1--Stable-green?style=for-the-badge)
 ![Broadcasting](https://img.shields.io/badge/Protocol-HTTP/UDP/OBS_WebSocket-orange?style=for-the-badge)
-[![Wiki](https://img.shields.io/badge/Docs-Wiki%20Manual-blue?style=for-the-badge)](wiki/Home.md)
+[![Wiki](https://img.shields.io/badge/Docs-Wiki%20Manual-blue?style=for-the-badge)](wiki/Home)
 
 ## 📖 How to Use
 
