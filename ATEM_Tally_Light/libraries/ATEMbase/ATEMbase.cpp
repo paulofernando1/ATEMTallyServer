@@ -1,30 +1,11 @@
 /*
-Copyright 2012-2014 Kasper Skårhøj, SKAARHOJ K/S, kasper@skaarhoj.com
-
-This file is part of the Blackmagic Design ATEM Client library for Arduino
-
-The ATEM library is free software: you can redistribute it and/or modify 
-it under the terms of the GNU General Public License as published by the 
-Free Software Foundation, either version 3 of the License, or (at your 
-option) any later version.
-
-The ATEM library is distributed in the hope that it will be useful, but 
-WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY 
-or FITNESS FOR A PARTICULAR PURPOSE. 
-See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along 
-with the ATEM library. If not, see http://www.gnu.org/licenses/.
-
-
-IMPORTANT: If you want to use this library in your own projects and/or products,
-please play a fair game and heed the license rules! See our web page for a Q&A so
-you can keep a clear conscience: http://skaarhoj.com/about/licenses/
-
-
-*/
-
-
+ * ==============================================================================
+ * ATEMbase Implementation - Protocol Marshalling
+ * ==============================================================================
+ * Low-level binary packet construction for ATEM commands.
+ * Extended to support 'Clnt' command for multi-device reporting via repeaters.
+ * ==============================================================================
+ */
 
 #include "ATEMbase.h"
 
@@ -939,11 +920,11 @@ void ATEMbase::resetCommandBundle()	{
 	_cBBO = 0;
 }
 
-void ATEMbase::sendRepeaterClients(IPAddress* clients, uint8_t count) {
+void ATEMbase::sendRepeaterClients(IPAddress* clients, int8_t* roles, uint8_t count) {
 	if (!_isConnected) return;
 	
-	// Command Header (8 bytes) + Count (2 bytes) + IP addresses (4 bytes each)
-	uint16_t payloadLen = 8 + 2 + (count * 4);
+	// Command Header (8 bytes) + Count (2 bytes) + IP+ID pairs (8 bytes each to stay 4-byte aligned)
+	uint16_t payloadLen = 8 + 2 + (count * 8);
 	uint16_t cmdLen = (payloadLen + 3) & ~3; // Align to 4 bytes
 	
 	_wipeCleanPacketBuffer();
@@ -959,15 +940,22 @@ void ATEMbase::sendRepeaterClients(IPAddress* clients, uint8_t count) {
 	_packetBuffer[18] = 'n';
 	_packetBuffer[19] = 't';
 	
-	// Payload
+	// Payload Header
 	_packetBuffer[20] = 0;
 	_packetBuffer[21] = count;
 	
 	for (int i = 0; i < count; i++) {
-		_packetBuffer[22 + (i * 4)] = clients[i][0];
-		_packetBuffer[23 + (i * 4)] = clients[i][1];
-		_packetBuffer[24 + (i * 4)] = clients[i][2];
-		_packetBuffer[25 + (i * 4)] = clients[i][3];
+		int base = 22 + (i * 8);
+		// IP [4 bytes]
+		_packetBuffer[base + 0] = clients[i][0];
+		_packetBuffer[base + 1] = clients[i][1];
+		_packetBuffer[base + 2] = clients[i][2];
+		_packetBuffer[base + 3] = clients[i][3];
+		// Tally ID [1 byte] + Padding [3 bytes]
+		_packetBuffer[base + 4] = (uint8_t)roles[i];
+		_packetBuffer[base + 5] = 0;
+		_packetBuffer[base + 6] = 0;
+		_packetBuffer[base + 7] = 0;
 	}
 	
 	_sendPacketBuffer(12 + cmdLen);

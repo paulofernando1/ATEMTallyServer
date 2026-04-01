@@ -1,3 +1,15 @@
+# ==============================================================================
+# OBS Tally Client - WebSocket 5.x Bridge
+# ==============================================================================
+# This module connects to OBS Studio using the Websocket-python client.
+# It monitors 'CurrentProgramSceneChanged' and 'CurrentPreviewSceneChanged'
+# to automatically update hardware tally flags.
+#
+# Logic: 
+# 1. Sync Program/Preview scenes.
+# 2. Map those scenes (and their composite inputs) back to Cam IDs.
+# ==============================================================================
+
 import threading
 import time
 from obsws_python import EventClient
@@ -83,10 +95,11 @@ class ObsTallyClient:
             return []
 
     def _update_tally(self):
-        flags = [0] * 8
+        # Support up to 41 cameras as per the main dashboard
+        flags = [0] * 41
         mapping = self.get_mapping() # dict of {index: input_name}
         
-        for i in range(8):
+        for i in range(41):
             target = mapping.get(i, "").strip().lower()
             if not target:
                 continue
@@ -104,60 +117,66 @@ class ObsTallyClient:
             self.on_tally_update(flags)
 
     def _run_loop(self):
+        from obsws_python import ReqClient
         while self.running:
             try:
-                # 1. Establish the EventClient to listen for Scene changes
+                # 1. Establish the Event Client first
+                print(f"OBS: Connecting Event Client to {self.host}:{self.port}...")
                 self.event_client = EventClient(host=self.host, port=self.port, password=self.password)
+                if not self.running: break
+                
                 self.event_client.callback.register([
                     self.on_current_program_scene_changed,
                     self.on_current_preview_scene_changed,
                     self.on_scene_item_enable_state_changed
                 ])
                 
-                # 2. Establish the ReqClient to poll initial Scene
-                from obsws_python import ReqClient
+                # Brief gap between client types to satisfy some OBS WebSocket versions
+                time.sleep(1.0)
+                if not self.running: break
+
+                # 2. Establish the Request Client
+                print(f"OBS: Connecting Request Client to {self.host}:{self.port}...")
                 self.req_client = ReqClient(host=self.host, port=self.port, password=self.password)
                 
-                try:
-                    prog_resp = self.req_client.get_current_program_scene()
-                    if hasattr(prog_resp, 'current_program_scene_name'):
-                        self.current_program = prog_resp.current_program_scene_name
-                        self.prog_inputs = self._get_scene_inputs(self.current_program)
-                except Exception as e:
-                    print(f"Failed to fetch initial Program scene: {e}")
+                # Fetch initial scenes
+                prog_resp = self.req_client.get_current_program_scene()
+                if hasattr(prog_resp, 'current_program_scene_name'):
+                    self.current_program = prog_resp.current_program_scene_name
+                    self.prog_inputs = self._get_scene_inputs(self.current_program)
 
-                try:    
-                    prev_resp = self.req_client.get_current_preview_scene()
-                    if hasattr(prev_resp, 'current_preview_scene_name'):
-                        self.current_preview = prev_resp.current_preview_scene_name
-                        self.prev_inputs = self._get_scene_inputs(self.current_preview)
-                except Exception as e:
-                    pass
+                prev_resp = self.req_client.get_current_preview_scene()
+                if hasattr(prev_resp, 'current_preview_scene_name'):
+                    self.current_preview = prev_resp.current_preview_scene_name
+                    self.prev_inputs = self._get_scene_inputs(self.current_preview)
 
-                self._update_tally() # Trigger initial tally setup based on current OBS state
+                print(f"OBS: Initial sync successful (PGM: {self.current_program})")
+                self._update_tally()
                 
-                # Wait until either client drops
+                # Health Monitor: Low frequency heartbeat (15s)
                 while self.running:
-                    # obsws-python uses a threaded websocket, we just sleep.
-                    # The library doesn't expose a clean boolean for connection state, 
-                    # but EventClient drops out if underlying thread dies.
-                    # We will rely on exceptions in callbacks or the user stopping.
-                    time.sleep(1)
+                    for _ in range(15): # 15s wait in 1s chunks to stay responsive to stop()
+                        if not self.running: break
+                        time.sleep(1)
+                    if not self.running: break
+
+                    try:
+                        self.req_client.get_version()
+                    except Exception as e:
+                        print(f"OBS: Heartbeat lost ({e}). Reconnecting...")
+                        break
 
             except Exception as e:
-                print(f"OBS connection error: {e}")
+                print(f"OBS: Connection error ({e}). Retrying in 5s...")
+                time.sleep(5)
             
-            # Cleanly disconnect before retrying loop to avoid orphaned threads/sockets
-            if self.event_client:
-                try: self.event_client.disconnect()
-                except: pass
-            if self.req_client:
-                try: self.req_client.disconnect()
-                except: pass
-                
-            self.event_client = None
-            self.req_client = None
-            
-            # Brief delay before reconnecting if we are still meant to be running
-            if self.running:
-                time.sleep(3)
+            finally:
+                # Clean teardown for next attempt
+                if self.event_client:
+                    try: self.event_client.disconnect()
+                    except: pass
+                if self.req_client:
+                    try: self.req_client.disconnect()
+                    except: pass
+                self.event_client = None
+                self.req_client = None

@@ -1,10 +1,20 @@
+# ==============================================================================
+# Tally Server Pro - ATEM Emulator (Main GUI Application)
+# ==============================================================================
+# This application emulates an ATEM Tally Server over UDP/9910.
+# It integrates with vMix, OBS Studio, and mobile web browsers.
+#
+# Author: Paulo Fernando
+# Version: 1.0.1
+# ==============================================================================
+
 import customtkinter as ctk
 import json
 import os
 import threading
 import requests
 import webbrowser
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, send_from_directory
 from flask_socketio import SocketIO, emit
 import engineio.async_drivers.threading # Force PyInstaller to bundle the threading async driver
 from tally_server import TallyServer
@@ -22,8 +32,17 @@ TEXT_WHITE = "#f8fafc"        # Slate 50
 # --- SILENCE STDOUT/STDERR FOR WINDOWED MODE (CRITICAL FOR FLASK) ---
 import sys
 import os
-sys.stdout = open(os.devnull, 'w')
-sys.stderr = open(os.devnull, 'w')
+# sys.stdout = open(os.devnull, 'w') # Commented out for debugging
+# sys.stderr = open(os.devnull, 'w')
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class TallyApp(ctk.CTk):
     def __init__(self):
@@ -57,10 +76,17 @@ class TallyApp(ctk.CTk):
         self.var_touch_mode = ctk.BooleanVar(value=False)
         self.var_save_window = ctk.BooleanVar(value=True)
         self.var_remotedisplay_mode = ctk.BooleanVar(value=False)
-        self.var_web_tally_enabled = ctk.BooleanVar(value=True)
+        self.var_auto_web_tally = ctk.BooleanVar(value=False)
+        
+        # --- WINDOW STATE PERSISTENCE ---
+        self.last_w = 1150
+        self.last_h = 700
+        self.bind("<Configure>", self.on_window_resize)
         
         # --- WEB TALLY STATE ---
-        self.web_tally_app = Flask(__name__)
+        # Initialize Flask with a static folder for local assets (Offline Support)
+        # Use resource_path to find the bundled assets in PyInstaller EXE
+        self.web_tally_app = Flask(__name__, static_folder=resource_path('static'))
         # Defer initialization to avoid crash at startup
         self.socketio = None
         self.is_web_server_active = False # New flag
@@ -99,6 +125,12 @@ class TallyApp(ctk.CTk):
         # Mandatory UI refresh to prevent black screens on some systems
         self.update()
 
+    def on_window_resize(self, event):
+        # Only track if it's the main window resize and not a child widget
+        if event.widget == self:
+            self.last_w = self.winfo_width()
+            self.last_h = self.winfo_height()
+
     def setup_ui(self):
         # 1. TOP HEADER
         self.header = ctk.CTkFrame(self, fg_color=HEADER_BG, height=60, corner_radius=0)
@@ -107,6 +139,7 @@ class TallyApp(ctk.CTk):
         self.lbl_header = ctk.CTkLabel(self.header, text="📡 Tally Server Pro Controller", 
                                      font=ctk.CTkFont(size=20, weight="bold"), text_color=TEXT_WHITE)
         self.lbl_header.pack(side="left", padx=20, pady=10)
+        self.broadcast_scheduled = False
 
         self.btn_settings = ctk.CTkButton(self.header, text="⚙️ Settings", width=100, 
                                         command=self.open_settings_menu,
@@ -182,27 +215,35 @@ class TallyApp(ctk.CTk):
 
         # 3. vMix
         self.vmix_card = self.create_card(self.left_col, "vMix Integration")
-        row_vmix = ctk.CTkFrame(self.vmix_card, fg_color="transparent")
-        row_vmix.pack(pady=5, fill="x", padx=10)
-        self.entry_vmix_host = ctk.CTkEntry(row_vmix, placeholder_text="IP Address", width=140)
-        self.entry_vmix_host.pack(side="left", expand=True, padx=2)
-        self.entry_vmix_port = ctk.CTkEntry(row_vmix, placeholder_text="8099", width=60)
-        self.entry_vmix_port.pack(side="left", padx=2)
+        row_vmix_ip = self.create_input_row(self.vmix_card, "Host IP:")
+        self.entry_vmix_host = ctk.CTkEntry(row_vmix_ip, width=140)
+        self.entry_vmix_host.pack(side="right")
+        
+        row_vmix_port = self.create_input_row(self.vmix_card, "Tally Port:")
+        self.entry_vmix_port = ctk.CTkEntry(row_vmix_port, width=80)
+        self.entry_vmix_port.insert(0, "8099")
+        self.entry_vmix_port.pack(side="right")
+        
         self.btn_vmix_connect = ctk.CTkButton(self.vmix_card, text="Connect vMix", command=self.toggle_vmix, height=35)
-        self.btn_vmix_connect.pack(pady=10, padx=10, fill="x")
+        self.btn_vmix_connect.pack(pady=(10, 15), padx=10, fill="x")
 
         # 4. OBS
         self.obs_card = self.create_card(self.left_col, "OBS integration")
-        row_obs = ctk.CTkFrame(self.obs_card, fg_color="transparent")
-        row_obs.pack(pady=5, fill="x", padx=10)
-        self.entry_obs_host = ctk.CTkEntry(row_obs, placeholder_text="IP Address", width=140)
-        self.entry_obs_host.pack(side="left", expand=True, padx=2)
-        self.entry_obs_port = ctk.CTkEntry(row_obs, placeholder_text="4455", width=60)
-        self.entry_obs_port.pack(side="left", padx=2)
-        self.entry_obs_pass = ctk.CTkEntry(self.obs_card, placeholder_text="Websocket Password", show="*", width=180)
-        self.entry_obs_pass.pack(pady=5, padx=10, fill="x")
+        row_obs_ip = self.create_input_row(self.obs_card, "Host IP:")
+        self.entry_obs_host = ctk.CTkEntry(row_obs_ip, width=140)
+        self.entry_obs_host.pack(side="right")
+        
+        row_obs_port = self.create_input_row(self.obs_card, "WS Port:")
+        self.entry_obs_port = ctk.CTkEntry(row_obs_port, width=80)
+        self.entry_obs_port.insert(0, "4455")
+        self.entry_obs_port.pack(side="right")
+        
+        row_obs_pass = self.create_input_row(self.obs_card, "WS Password:")
+        self.entry_obs_pass = ctk.CTkEntry(row_obs_pass, placeholder_text="Password", show="*", width=140)
+        self.entry_obs_pass.pack(side="right")
+        
         self.btn_obs_connect = ctk.CTkButton(self.obs_card, text="Connect OBS", command=self.toggle_obs, height=35)
-        self.btn_obs_connect.pack(pady=10, padx=10, fill="x")
+        self.btn_obs_connect.pack(pady=(5, 15), padx=10, fill="x")
 
         # --- RIGHT COL: MONITORING ---
         self.right_col = ctk.CTkFrame(self.main_container, fg_color=PANEL_COLOR)
@@ -451,17 +492,17 @@ class TallyApp(ctk.CTk):
             left_inner.pack(fill="both", expand=True, padx=15, pady=15)
             
             ctk.CTkLabel(left_inner, text="⚙️ Preferences", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
-            ctk.CTkCheckBox(left_inner, text="Save Config on Exit", variable=self.var_save_on_exit).pack(pady=6, padx=10, anchor="w")
-            ctk.CTkCheckBox(left_inner, text="Auto-start Server", variable=self.var_auto_server).pack(pady=6, padx=10, anchor="w")
-            ctk.CTkCheckBox(left_inner, text="Auto-connect vMix", variable=self.var_auto_vmix).pack(pady=6, padx=10, anchor="w")
-            ctk.CTkCheckBox(left_inner, text="Auto-connect OBS", variable=self.var_auto_obs).pack(pady=6, padx=10, anchor="w")
-            ctk.CTkCheckBox(left_inner, text="Touchscreen Mode", variable=self.var_touch_mode, command=self.apply_touch_scale).pack(pady=6, padx=10, anchor="w")
-            ctk.CTkCheckBox(left_inner, text="Save Window Size", variable=self.var_save_window).pack(pady=6, padx=10, anchor="w")
-            ctk.CTkCheckBox(left_inner, text="Enable Remote Display", variable=self.var_remotedisplay_mode, command=self.toggle_remotedisplay_ui).pack(pady=6, padx=10, anchor="w")
-            ctk.CTkCheckBox(left_inner, text="Enable Web Tally Logic", variable=self.var_web_tally_enabled).pack(pady=6, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Save Config on Exit", variable=self.var_save_on_exit).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Save Window Sizes", variable=self.var_save_window).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Enable Remote Displays", variable=self.var_remotedisplay_mode, command=self.toggle_remotedisplay_ui).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Enable Touchscreen Mode", variable=self.var_touch_mode, command=self.apply_touch_scale).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="AutoStart Server", variable=self.var_auto_server).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="AutoStart WebTallys Server", variable=self.var_auto_web_tally).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Auto Connect OBS", variable=self.var_auto_obs).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Auto Connect vMix", variable=self.var_auto_vmix).pack(pady=5, padx=10, anchor="w")
             
-            ctk.CTkLabel(left_inner, text="Version: V 2.2\nMax Capacity: up to 41 Tally Lights\nManagement of connected web clients is\nnow handled in the main dashboard.", 
-                          font=ctk.CTkFont(size=11), text_color=SUBTEXT_COLOR).pack(pady=15)
+            ctk.CTkLabel(left_inner, text="Version: V 1.0.1 Stable\nMax Capacity: up to 41 Tally Lights\n\nDeveloped by Paulo Fernando", 
+                          font=ctk.CTkFont(size=11), text_color=SUBTEXT_COLOR).pack(pady=20)
 
             # --- RIGHT COL: TALLY MANAGEMENT ---
             right_f = ctk.CTkFrame(main_f, fg_color=PANEL_COLOR)
@@ -471,11 +512,20 @@ class TallyApp(ctk.CTk):
             
             ctk.CTkLabel(right_inner, text="📡 Tally Management", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
             
-            # Thread-safe client list access
+            # Thread-safe client list access - include direct and repeater clients
             try:
                 clients_snapshot = list(self.server.clients)
                 self.tally_ips = [c.ip for c in clients_snapshot if c.is_connected]
-            except:
+                
+                # Also include clients reported via repeaters
+                for parent_ip, sub_data in getattr(self.server, 'repeater_clients', {}).items():
+                    for sub_item in sub_data:
+                        # sub_item is (ip, role) tuple
+                        sub_ip = sub_item[0]
+                        if sub_ip not in self.tally_ips:
+                            self.tally_ips.append(sub_ip)
+            except Exception as e:
+                print(f"IP SCAN ERROR: {e}")
                 self.tally_ips = []
                 
             if not self.tally_ips: self.tally_ips = ["No Tally Connected"]
@@ -571,10 +621,10 @@ class TallyApp(ctk.CTk):
         if ip and ip != "No Tally Connected":
             webbrowser.open(f"http://{ip}/update")
 
-    def handle_web_set_cam(self, sid, data):
-        # 'sid' is passed as first arg by flask-socketio's on_event wrapper
+    def handle_web_set_cam(self, data):
+        sid = request.sid
         if not isinstance(data, dict):
-            return  # Safety check in case args are shifted
+            return 
         idx = int(data.get('index', 0))
         self.web_clients[sid] = idx
         self.after(0, self.update_web_tally_ui)
@@ -582,28 +632,11 @@ class TallyApp(ctk.CTk):
         # Send the client its current tally state immediately
         self.after(50, lambda s=sid, i=idx: self._sync_web_client_cam(s, i))
 
-    def update_web_tally_ui(self):
-        # Clear old items
-        for child in self.web_tally_list_f.winfo_children():
-            child.destroy()
-        
-        if not self.web_clients:
-            ctk.CTkLabel(self.web_tally_list_f, text="No Web Clients Connected", font=ctk.CTkFont(size=11), text_color=SUBTEXT_COLOR).pack(pady=10)
-            return
+    def handle_web_heartbeat(self, data):
+        # Simply acknowledges the client is alive
+        pass
 
-        for sid, cam_idx in self.web_clients.items():
-            row = ctk.CTkFrame(self.web_tally_list_f, fg_color="transparent")
-            row.pack(fill="x", pady=2)
-            
-            # Use short ID for display
-            short_id = sid[:6] if len(sid) > 6 else sid
-            ctk.CTkLabel(row, text=f"Client {short_id}:", font=ctk.CTkFont(size=11)).pack(side="left", padx=5)
-            
-            combo = ctk.CTkComboBox(row, values=[f"Cam {i+1}" for i in range(41)], width=100, height=24, font=ctk.CTkFont(size=11))
-            combo.set(f"Cam {cam_idx + 1}")
-            # Use a closure to capture sid and combo
-            combo.configure(command=lambda val, s=sid, c=combo: self.set_web_client_cam(s, c))
-            combo.pack(side="right", padx=5)
+
 
     def set_web_client_cam(self, sid, combo):
         try:
@@ -620,6 +653,13 @@ class TallyApp(ctk.CTk):
 
     def setup_web_tally_routes(self):
         if self.socketio:
+            @self.web_tally_app.route('/static/socket.io.min.js')
+            def serve_socketio():
+                # Explicitly serve with correct MIME type to avoid mobile browser security blocks
+                # Use resource_path for PyInstaller bundle compatibility
+                static_dir = resource_path('static')
+                return send_from_directory(static_dir, 'socket.io.min.js', mimetype='application/javascript')
+
             @self.web_tally_app.route('/')
             def index():
                 return render_template_string('''
@@ -627,72 +667,118 @@ class TallyApp(ctk.CTk):
                 <html>
                 <head>
                     <title>Web Tally Light Simulation</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                    <script src="https://cdnjs.cloudflare.com/ajax/libs/socketio/4.7.2/socketio.min.js"></script>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+                    <!-- Local Socket.IO Library (True Offline Production Support) -->
+                    <script src="/static/socket.io.min.js?v=4.7.2"></script>
                     <style>
-                        body { margin: 0; padding: 0; background: #000; color: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
-                        #tally { width: 100vw; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: background 0.15s ease-in-out; }
-                        #cam-info { position: absolute; top: 30px; font-size: 32px; font-weight: 800; background: rgba(0,0,0,0.6); padding: 10px 30px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.2); }
-                        #status { font-size: 100px; font-weight: 900; text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 5px 15px rgba(0,0,0,0.5); }
-                        .prog { background: #dc2626 !important; } /* Red 600 */
-                        .prev { background: #16a34a !important; color: #fff !important; } /* Green 600 */
-                        .att { background: #2563eb !important; } /* Blue 600 */
-                        .off { background: #0f172a !important; } /* Slate 900 */
-                        #settings-panel { position: absolute; bottom: 30px; background: rgba(0,0,0,0.7); padding: 15px 25px; border-radius: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(5px); }
-                        select { background: #1e293b; color: white; border: 1px solid #475569; padding: 10px 15px; font-size: 18px; border-radius: 8px; outline: none; cursor: pointer; }
-                        .hint { margin-top: 10px; font-size: 12px; color: #94a3b8; text-align: center; }
+                        body { margin: 0; padding: 0; background: #000; color: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; height: 100vh; width: 100vw; }
+                        #tally { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+                        #cam-info { position: absolute; top: 10vh; font-size: 38px; font-weight: 800; background: rgba(0,0,0,0.7); padding: 10px 40px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.3); backdrop-filter: blur(10px); }
+                        #status { font-size: 15vw; font-weight: 900; text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 5px 25px rgba(0,0,0,0.8); pointer-events: none; }
+                        .prog { background: #dc2626 !important; box-shadow: inset 0 0 100px rgba(0,0,0,0.5); }
+                        .prev { background: #16a34a !important; color: #fff !important; box-shadow: inset 0 0 100px rgba(0,0,0,0.5); }
+                        .att { background: #2563eb !important; box-shadow: inset 0 0 100px rgba(0,0,0,0.5); }
+                        .off { background: #0f172a !important; }
+                        #settings-panel { position: absolute; bottom: 8vh; background: rgba(0,0,0,0.8); padding: 20px 30px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(15px); display: flex; flex-direction: column; align-items: center; gap: 10px; }
+                        select { background: #1e293b; color: white; border: 1px solid #475569; padding: 12px 20px; font-size: 20px; border-radius: 12px; outline: none; cursor: pointer; width: 220px; text-align: center; }
+                        .btn-sync { background: #475569; color: white; border: none; padding: 8px 15px; border-radius: 8px; font-size: 11px; cursor: pointer; transition: 0.2s; }
+                        .btn-sync:active { transform: scale(0.9); background: #64748b; }
+                        .hint { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
                     </style>
                 </head>
                 <body>
                     <div id="tally" class="off">
                         <div id="cam-info">CAM 1</div>
                         <div id="status">OFF</div>
+                        <div id="socket-status" style="font-size: 11px; opacity: 0.7; margin-top: 15px; font-weight: bold; font-family: monospace;">CONNECTING...</div>
                         <div id="settings-panel">
                             <select id="cam-num" onchange="updateCam()">
-                                {% for i in range(1, 42) %}<option value="{{ i-1 }}">Assign to Camera {{ i }}</option>{% endfor %}
+                                {% for i in range(1, 42) %}<option value="{{ i-1 }}">ASSIGN CAM {{ i }}</option>{% endfor %}
                             </select>
-                            <div class="hint">Digital Tally Emulation</div>
+                            <button class="btn-sync" onclick="forceSync()">FORCE RE-SYNC</button>
+                            <div class="hint">Digital Tally Client</div>
                         </div>
                     </div>
                     <script>
-                        var socket = io();
-                        var camIdx = 0;
+                        // Diagnostic: Check if library loaded
+                        if (typeof io === 'undefined') {
+                            document.getElementById("socket-status").innerText = "FAILED: Library not loaded. Check Internet.";
+                            document.getElementById("socket-status").style.color = "red";
+                        }
+
+                        // Use explicit host to avoid guessing if the relative path fails on some mobile browsers
+                        var socket = io(window.location.protocol + "//" + window.location.host, {
+                            transports: ['websocket', 'polling'],
+                            upgrade: true
+                        });
+                        
+                        var camIdx = parseInt(localStorage.getItem('web_tally_cam') || 0);
+                        document.getElementById("cam-num").value = camIdx;
+                        document.getElementById("cam-info").innerText = "CAM " + (camIdx + 1);
+
                         function updateCam() {
-                            camIdx = document.getElementById("cam-num").value;
-                            document.getElementById("cam-info").innerText = "CAM " + (parseInt(camIdx) + 1);
+                            camIdx = parseInt(document.getElementById("cam-num").value);
+                            document.getElementById("cam-info").innerText = "CAM " + (camIdx + 1);
+                            document.getElementById("socket-status").innerText = "UPDATING CAM " + (camIdx + 1);
+                            socket.emit('set_cam', {index: camIdx});
+                            localStorage.setItem('web_tally_cam', camIdx);
+                        }
+
+                        function forceSync() {
+                            document.getElementById("socket-status").innerText = "FORCE SYNCING...";
                             socket.emit('set_cam', {index: camIdx});
                         }
+
                         socket.on('connect', function() {
+                            console.log("Web Tally Connected");
+                            document.getElementById("socket-status").innerText = "ONLINE (SID: " + socket.id.substring(0,6) + ")";
+                            document.getElementById("socket-status").style.color = "#4ade80";
                             socket.emit('set_cam', {index: camIdx});
                         });
-                        socket.on('tally_update', function(data) {
-                            if(data.index == camIdx) {
-                                var el = document.getElementById("tally");
-                                var st = document.getElementById("status");
-                                var flag = data.flag;
-                                el.className = "";
-                                el.style.background = ""; // Reset custom colors
-
-                                // RGB LED2 Logic (Priority)
-                                if (flag & 0x40) { // LED2 Override active
-                                    var r = (flag & 0x04) ? 255 : 0;
-                                    var g = (flag & 0x08) ? 255 : 0;
-                                    var b = (flag & 0x10) ? 255 : 0;
-                                    
-                                    if(r || g || b) {
-                                        el.style.background = "rgb("+r+","+g+","+b+")";
-                                        st.innerText = (r?"R":"") + (g?"G":"") + (b?"B":"");
-                                        return;
-                                    }
-                                }
-
-                                // Standard LED1 Logic
-                                if(flag & 0x01) { el.classList.add("prog"); st.innerText = "PROGRAM"; }
-                                else if(flag & 0x02) { el.classList.add("prev"); st.innerText = "PREVIEW"; }
-                                else if(flag & 0x20) { el.classList.add("att"); st.innerText = "ATTENTION"; }
-                                else { el.classList.add("off"); st.innerText = "OFF"; }
-                            }
+                        
+                        socket.on('disconnect', function() {
+                            document.getElementById("socket-status").innerText = "RECONNECTING...";
+                            document.getElementById("socket-status").style.color = "#fbbf24";
                         });
+
+                        socket.on('connect_error', function(err) {
+                            document.getElementById("socket-status").innerText = "CONNECTION ERROR: " + err.message;
+                            document.getElementById("socket-status").style.color = "#f87171";
+                        });
+
+                        setInterval(function() {
+                            if (socket.connected) socket.emit('heartbeat', {sid: socket.id});
+                        }, 5000);
+                        socket.on('tally_update', function(data) {
+                            if(data.index == camIdx) applyUpdate(data.flag);
+                        });
+                        socket.on('tally_bulk_update', function(data) {
+                            if(!data || !data.updates) return;
+                            data.updates.forEach(function(item) {
+                                if(item.index == camIdx) applyUpdate(item.flag);
+                            });
+                        });
+                        function applyUpdate(flag) {
+                            var el = document.getElementById("tally");
+                            var st = document.getElementById("status");
+                            el.className = "";
+                            el.style.background = ""; 
+
+                            if (flag & 0x40) {
+                                var r = (flag & 0x04) ? 255 : 0;
+                                var g = (flag & 0x08) ? 255 : 0;
+                                var b = (flag & 0x10) ? 255 : 0;
+                                if(r || g || b) {
+                                    el.style.background = "rgb("+r+","+g+","+b+")";
+                                    st.innerText = (r?"R":"") + (g?"G":"") + (b?"B":"");
+                                    return;
+                                }
+                            }
+                            if(flag & 0x01) { el.classList.add("prog"); st.innerText = "PROGRAM"; }
+                            else if(flag & 0x02) { el.classList.add("prev"); st.innerText = "PREVIEW"; }
+                            else if(flag & 0x20) { el.classList.add("att"); st.innerText = "ATTENTION"; }
+                            else { el.classList.add("off"); st.innerText = "OFF"; }
+                        }
                         socket.on('force_cam', function(data) {
                             camIdx = data.index;
                             document.getElementById("cam-num").value = camIdx;
@@ -706,6 +792,7 @@ class TallyApp(ctk.CTk):
             self.socketio.on_event('connect', self.handle_web_connect)
             self.socketio.on_event('disconnect', self.handle_web_disconnect)
             self.socketio.on_event('set_cam', self.handle_web_set_cam)
+            self.socketio.on_event('heartbeat', self.handle_web_heartbeat)
 
     def start_web_server(self):
         try:
@@ -897,11 +984,21 @@ class TallyApp(ctk.CTk):
                 elif f == 32: v = "ATT" # 0x20
                 self.tally_vars_led1[i].set(v)
                 self.update_led1_ui_buttons(i)
-        self.broadcast_all_tally()
+        self.trigger_broadcast()
 
     def set_led1_state(self, idx, state):
         self.tally_vars_led1[idx].set(state)
         self.update_led1_ui_buttons(idx)
+        self.trigger_broadcast()
+
+    def trigger_broadcast(self):
+        # Throttle broadcasts to 50ms to prevent network/socket congestion
+        if not self.broadcast_scheduled:
+            self.broadcast_scheduled = True
+            self.after(50, self._do_broadcast)
+
+    def _do_broadcast(self):
+        self.broadcast_scheduled = False
         self.broadcast_all_tally()
 
     def update_led1_ui_buttons(self, idx):
@@ -925,41 +1022,43 @@ class TallyApp(ctk.CTk):
         self.broadcast_all_tally()
 
     def broadcast_all_tally(self):
-        self.server.set_tally_sources(90)
-        for i in range(self.current_rows_count):
-            l1 = self.tally_vars_led1[i].get()
+        # 120 sources to cover all tallies + Remote Display (41+) + Message buffer (82-106)
+        self.server.set_tally_sources(120)
+        
+        batch_data = []
+        # We broadcast all 41 possible camera indices
+        for i in range(41):
             f = 0
-            if l1 == "Prog": f |= 0x01
-            elif l1 == "Prev": f |= 0x02
-            elif l1 == "ATT": f |= 0x20
-            
-            # LED 2 RGB
-            r2 = self.tally_vars_led2_r[i].get()
-            g2 = self.tally_vars_led2_g[i].get()
-            b2 = self.tally_vars_led2_b[i].get()
-            
-            if r2: f |= 0x04
-            if g2: f |= 0x08
-            if b2: f |= 0x10
-            
-            # FORCE LED2 AUX OVERRIDE (Bit 6 / 0x40)
-            if r2 or g2 or b2:
-                f |= 0x40
+            if i < self.current_rows_count:
+                l1 = self.tally_vars_led1[i].get()
+                if l1 == "Prog": f |= 0x01
+                elif l1 == "Prev": f |= 0x02
+                elif l1 == "ATT": f |= 0x20
                 
+                # LED 2 RGB
+                if self.tally_vars_led2_r[i].get(): f |= 0x04
+                if self.tally_vars_led2_g[i].get(): f |= 0x08
+                if self.tally_vars_led2_b[i].get(): f |= 0x10
+                
+                # FORCE LED2 AUX OVERRIDE (Bit 6 / 0x40)
+                if f & 0x1C: f |= 0x40
+            
             self.server.set_tally_flag(i, f)
             
-            # Broadcast to Web Tally Clients  
-            # Use socketio.server.emit directly to avoid flask.request context requirements
-            if self.socketio and self.var_web_tally_enabled.get():
-                try:
-                    self.socketio.server.emit('tally_update', {'index': i, 'flag': f}, namespace='/')
-                except Exception:
-                    pass
+            # Prepare batch data for Web Tally
+            if self.is_web_server_active:
+                batch_data.append({'index': i, 'flag': f})
             
             # Remote Display Modes (Stored per Camera Slot)
-            # Re-mapped to 41+range to avoid conflict with Camera 9-41 tallys
             if i < len(self.remotedisplay_display_modes):
                 self.server.set_tally_flag(41 + i, self.remotedisplay_display_modes[i])
+                
+        # Emit Batch to Web Tally Clients  
+        if self.socketio and self.is_web_server_active and batch_data:
+            try:
+                self.socketio.emit('tally_bulk_update', {'updates': batch_data})
+            except Exception:
+                pass
             
         # Message Buffer: Re-mapped to start at index 82
         msg_bytes = list(self.remotedisplay_last_msg.encode('ascii', 'ignore')[:24])
@@ -970,17 +1069,17 @@ class TallyApp(ctk.CTk):
         # Message Length Trigger: Re-mapped to index 106
         self.server.set_tally_flag(106, len(msg_bytes))
 
-    def handle_web_connect(self, sid, *args, **kwargs):
-        # 'sid' is passed as first arg by flask-socketio's on_event wrapper
+    def handle_web_connect(self, *args, **kwargs):
+        sid = request.sid
+        print(f"WEB TALLY CONNECTED: {sid}")
         self.web_clients[sid] = 0
-        # Update both the web tally panel AND the main client list / orbs
         self.after(0, self.update_web_tally_ui)
         self.after(0, self.update_client_list)
-        # Send current tally state for cam 0 immediately
         self.after(50, lambda s=sid: self._sync_web_client_cam(s, 0))
 
-    def handle_web_disconnect(self, sid, *args, **kwargs):
-        # 'sid' is passed as first arg by flask-socketio's on_event wrapper
+    def handle_web_disconnect(self, *args, **kwargs):
+        sid = request.sid
+        print(f"WEB TALLY DISCONNECTED: {sid}")
         self.web_clients.pop(sid, None)
         self.after(0, self.update_web_tally_ui)
         self.after(0, self.update_client_list)
@@ -998,10 +1097,10 @@ class TallyApp(ctk.CTk):
         if self.tally_vars_led2_b[idx].get(): f |= 0x10
         
         if f & 0x1C: f |= 0x40 # Override bit if RGB
-        # Emit directly using socketio.server to avoid request context requirement
+        # Emit using socketio.emit to the specific SID
         if self.socketio:
             try:
-                self.socketio.server.emit('tally_update', {'index': idx, 'flag': f}, to=sid, namespace='/')
+                self.socketio.emit('tally_update', {'index': idx, 'flag': f}, to=sid)
             except Exception:
                 pass
 
@@ -1009,36 +1108,44 @@ class TallyApp(ctk.CTk):
 
     def update_web_tally_ui(self):
         try:
+            # Clear old items except the 'No clients' label if empty
             if not getattr(self, 'web_clients', None):
-                self.lbl_no_web.pack(pady=10)
                 for w in self.web_tally_list_f.winfo_children():
                     if w != self.lbl_no_web: w.destroy()
+                self.lbl_no_web.pack(pady=10)
                 return
                 
             self.lbl_no_web.pack_forget()
             for w in self.web_tally_list_f.winfo_children():
                 if w != self.lbl_no_web: w.destroy()
             
-            for sid, target_cam in self.web_clients.items():
+            # Rebuild the list of web clients
+            for sid, target_cam in list(self.web_clients.items()):
                 row = ctk.CTkFrame(self.web_tally_list_f, fg_color="#1e293b", corner_radius=6)
                 row.pack(fill="x", pady=2)
                 
-                name_lbl = ctk.CTkLabel(row, text=f"📱 Client {sid[:4]}...", font=ctk.CTkFont(size=12, weight="bold"))
+                # Show first 8 chars of SID for better identification
+                short_id = sid[:8] if sid else "????"
+                name_lbl = ctk.CTkLabel(row, text=f"📱 Client {short_id}...", font=ctk.CTkFont(size=12, weight="bold"))
                 name_lbl.pack(side="left", padx=10, pady=5)
                 
-                combo = ctk.CTkComboBox(row, values=[f"Cam {i+1}" for i in range(8)], width=90, height=24)
+                combo = ctk.CTkComboBox(row, values=[f"Cam {i+1}" for i in range(41)], width=100, height=24)
                 combo.set(f"Cam {target_cam+1}")
                 combo.pack(side="right", padx=10, pady=5)
                 
                 def on_change(choice, s=sid):
-                    idx = int(choice.split(" ")[1]) - 1
-                    self.web_clients[s] = idx
-                    if self.socketio and self.var_web_tally_enabled.get(): 
-                        self.socketio.emit('force_cam', {'index': idx}, to=s)
-                    self.broadcast_all_tally()
+                    try:
+                        idx = int(choice.split(" ")[1]) - 1
+                        if s in self.web_clients:
+                            self.web_clients[s] = idx
+                            if self.socketio:
+                                self.socketio.emit('force_cam', {'index': idx}, to=s)
+                            self.broadcast_all_tally()
+                    except: pass
                     
                 combo.configure(command=on_change)
-        except Exception as e: pass
+        except Exception as e:
+            print(f"WEB UI UPDATE ERROR: {e}")
 
 
     def on_client_update(self):
@@ -1065,9 +1172,24 @@ class TallyApp(ctk.CTk):
                         active_ids.add(c.tally_id)
             
             # Add Sub-clients reported via Repeaters
-            for parent_ip, sub_ips in getattr(self.server, 'repeater_clients', {}).items():
-                for sub_ip in sub_ips:
-                    text_lines.append(f"  └─ [{sub_ip}] via Repeater ({parent_ip})")
+            for parent_ip, sub_data in getattr(self.server, 'repeater_clients', {}).items():
+                for sub_item in sub_data:
+                    # sub_item is (ip, role)
+                    sub_ip, sub_role = sub_item
+                    role_str = f"Role: Cam {sub_role + 1}" if sub_role >= 0 else "Role: ?"
+                    text_lines.append(f"  └─ [{sub_ip}] {role_str} via Repeater ({parent_ip})")
+                    if sub_role >= 0:
+                        active_ids.add(sub_role)
+            
+            # Show if current dashboard tally rows are active via ANY connection
+            active_repeater_sub_ips = []
+            for sub_data in self.server.repeater_clients.values():
+                for sub_item in sub_data:
+                    active_repeater_sub_ips.append(sub_item[0])
+            
+            # Final footer summary (optional)
+            if not text_lines: 
+                text_lines.append("No active clients detected.")
         
         output_text = "\n".join(text_lines)
         self.txt_clients.insert("end", output_text if output_text else "Waiting for connections...")
@@ -1076,12 +1198,22 @@ class TallyApp(ctk.CTk):
         # Final dashboard footer logic
         pass
         
-        # Row Status Orbs - light up for the specific Cam Role connected
+        # Row Status Orbs - high-reliability lighting logic
         for i in range(self.current_rows_count):
-            if self.is_server_running and i in active_ids:
+            is_active = (i in active_ids)
+            
+            # Additional check: If row role is mentioned by an online repeater
+            # We don't have direct role matching for repeater clients, but if the repeater
+            # is connected and reporting sub-IPs, we show status for the repeater itself.
+            # However, if a sub-tally connects eventually, c.tally_id will handle it.
+            
+            if self.is_server_running and is_active:
                 self.tally_status_orbs[i].configure(text="● ONLINE", text_color="#10b981")
             else:
                 self.tally_status_orbs[i].configure(text="● Idle", text_color=SUBTEXT_COLOR)
+        
+        # Force UI refresh
+        self.update_idletasks()
 
     def load_config(self):
         if not os.path.exists(self.config_file): return
@@ -1109,6 +1241,7 @@ class TallyApp(ctk.CTk):
                 self.var_touch_mode.set(c.get("touch_mode", False))
                 self.var_save_window.set(c.get("save_window", True))
                 self.var_remotedisplay_mode.set(c.get("remotedisplay_mode", False))
+                self.var_auto_web_tally.set(c.get("auto_web_tally", False))
                 self.toggle_remotedisplay_ui()
                 
                 if self.var_save_window.get():
@@ -1150,6 +1283,7 @@ class TallyApp(ctk.CTk):
             self.root.after(1000, lambda: self.on_remotedisplay_target_changed(self.combo_remotedisplay_target.get()))
         if self.var_auto_vmix.get(): self.toggle_vmix()
         if self.var_auto_obs.get(): self.toggle_obs()
+        if self.var_auto_web_tally.get(): self.toggle_web_server()
 
     def save_config(self):
         if not self.var_save_on_exit.get(): return
@@ -1160,14 +1294,15 @@ class TallyApp(ctk.CTk):
             "web_port": self.entry_web_port.get(),
             "save_on_exit": self.var_save_on_exit.get(), "auto_server": self.var_auto_server.get(),
             "auto_vmix": self.var_auto_vmix.get(), "auto_obs": self.var_auto_obs.get(),
+            "auto_web_tally": self.var_auto_web_tally.get(),
             "touch_mode": self.var_touch_mode.get(), 
             "remotedisplay_mode": self.var_remotedisplay_mode.get(),
             "remotedisplay_target": self.combo_remotedisplay_target.get(),
             "remotedisplay_mode_val": self.remotedisplay_radio_var.get(),
             "remotedisplay_msg": self.entry_remotedisplay_msg.get(),
             "save_window": self.var_save_window.get(),
-            "window_w": self.winfo_width(),
-            "window_h": self.winfo_height(),
+            "window_w": self.last_w,
+            "window_h": self.last_h,
             "row_count": self.current_rows_count,
             "scenes": [v.get() for v in self.tally_scene_vars]
         }

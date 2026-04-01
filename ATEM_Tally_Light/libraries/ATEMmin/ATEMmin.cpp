@@ -327,12 +327,12 @@ ATEMmin::ATEMmin(){}
 				}
 				*/
 				
-				// Cap to 128 for safety (size of atemTallyByIndexTallyFlags)
-				uint8_t capSources = (sources > 128) ? 128 : (uint8_t)sources;
+				// Cap to 128 for safety (size of atemTallyByIndexTallyFlags array in .h)
+				uint16_t capSources = (sources > 128) ? 128 : sources;
 				atemTallyByIndexSources = capSources;
 
 				// Bytes 2+ are the flags
-				for(uint8_t a=0; a<capSources; a++)	{
+				for(uint16_t a=0; a<capSources; a++)	{
 					atemTallyByIndexTallyFlags[a] = _packetBuffer[2 + a];
 				}
 			}
@@ -641,8 +641,8 @@ ATEMmin::ATEMmin(){}
 			 * index 	Index number
 			 */
 			uint8_t ATEMmin::getTallyByIndexTallyFlags(uint16_t index) {
-				// Safety bounds check to prevent Exception (28)
-				if (index >= 100) return 0;
+				// Updated safety bounds for 128 indices
+				if (index >= 128) return 0;
 				return atemTallyByIndexTallyFlags[index];
 			}
 			

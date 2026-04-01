@@ -1,22 +1,14 @@
 /*
-Copyright (C) 2023 Aron N. Het Lam, aronhetlam@gmail.com
-
-This file is a part of the Tally Sever library for use with Kasper Skårhøj's
-(<https://skaarhoj.com>) ATEM client libraries for Arduino.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
+ * ==============================================================================
+ * TallyServer Library - Core Tally Logic for Arduino/ESP
+ * ==============================================================================
+ * This library emulates the server-side of the ATEM Tally protocol.
+ * It manages multiple concurrent clients and handles the proprietary 
+ * binary header/payload framing required for tally updates.
+ *
+ * Author: Aron N. Het Lam / Paulo Fernando
+ * ==============================================================================
+ */
 
 #include "Arduino.h"
 
@@ -39,8 +31,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define TALLY_SERVER_CONNECTION_REJECTED    3
 #define TALLY_SERVER_CONNECTION_LOST        4
 
-#define TALLY_SERVER_MAX_TALLY_FLAGS    100
-#define TALLY_SERVER_BUFFER_LENGTH      144
+#define TALLY_SERVER_MAX_TALLY_FLAGS    128
+#define TALLY_SERVER_BUFFER_LENGTH      256
 
 #define TALLY_SERVER_DEFAULT_MAX_CLIENTS    5
 
@@ -59,6 +51,7 @@ private:
         uint16_t _tallyPort;
         bool _isConnected;
         bool _isInitialized;
+        int8_t _tallyID;
         uint16_t _localPacketIdCounter;
         uint16_t _sessionID;
         unsigned long _lastRecv;
@@ -107,4 +100,5 @@ public:
     int getMaxClients() { return _maxClients; }
     bool isClientConnected(int index) { return (index >= 0 && index < _maxClients) ? _clients[index]._isConnected : false; }
     IPAddress getClientIP(int index) { return (index >= 0 && index < _maxClients) ? _clients[index]._tallyIP : IPAddress(0,0,0,0); }
+    int8_t getClientTallyID(int index) { return (index >= 0 && index < _maxClients) ? _clients[index]._tallyID : -1; }
 };
