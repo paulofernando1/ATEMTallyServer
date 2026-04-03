@@ -7,6 +7,7 @@ Tally Server Pro is a professional-grade, multi-protocol tally server designed f
 [![Wiki](https://img.shields.io/badge/Docs-Wiki%20Manual-blue?style=for-the-badge)](https://github.com/paulofernando1/ATEMTallyServer/wiki)
 
 [Windows V.1.0.1 Direct Download](https://github.com/paulofernando1/ATEMTallyServer/releases/download/v1.0.1/TallyServerEmulatorWindows.zip)
+
 [Firmware BIN OTA Direct Download for ESP 8266 With 2 RGB LEDS](https://github.com/paulofernando1/ATEMTallyServer/releases/download/v1.0.1/ESP8266.I2C.Display.BIN.Firmware.v1.0.1.zip)
 
 ## 📖 How to Use
