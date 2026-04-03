@@ -2,7 +2,7 @@
 
 Tally Server Pro is a professional-grade, multi-protocol tally server designed for broadcast environments. It emulates an ATEM Tally Server over UDP/9910, allowing DIY Tally Lights (ESP8266/ESP32) and mobile browsers to receive real-time status.
 
-![Version](https://img.shields.io/badge/Status-V1.0.1--Stable-green?style=for-the-badge)
+[![Version](https://img.shields.io/badge/Status-V1.0.1--Stable-green?style=for-the-badge)](https://github.com/paulofernando1/ATEMTallyServer/releases/download/v1.0.1/TallyServerEmulatorWindows.zip)
 ![Broadcasting](https://img.shields.io/badge/Protocol-HTTP/UDP/OBS_WebSocket-orange?style=for-the-badge)
 [![Wiki](https://img.shields.io/badge/Docs-Wiki%20Manual-blue?style=for-the-badge)](https://github.com/paulofernando1/ATEMTallyServer/wiki)
 
