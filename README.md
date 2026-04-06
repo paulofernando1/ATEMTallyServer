@@ -35,6 +35,38 @@ Tally Server Pro is a professional-grade, multi-protocol tally server designed f
 5. **Force Re-Sync:** If a mobile client loses connection or fails to update, use the **"FORCE RE-SYNC"** button on the mobile screen to refresh states.
 6. **Assign Role:** Select your camera role (Cam 1-41) directly from the mobile browser dropdown.
 
+## 5. LED pins defined on default ESP firmware
+**ESP32:**
+ 
+ LED1
+1. RED = PIN 32
+2. GREEN = PIN 32
+3. BLUE = PIN 25
+
+ LED2
+1. RED = PIN 26
+2. GREEN = PIN 27
+3. BLUE = PIN 14
+
+4. **ESP8266:**
+ 
+ LED1
+1. RED = PIN 16
+2. GREEN = PIN 5
+3. BLUE = PIN 0
+
+ LED2
+1. RED = PIN 2
+2. GREEN = PIN 13
+3. BLUE = PIN 15
+
+## 6. I2C Display pins defined on default ESP Firmware
+**ESP32 / ESP82266 / NodeMCU**
+ 
+OLED SCL = PIN 12
+OLED SDA = PIN 14
+
+
 ---
 
 ## 🛠️ Technical Details
