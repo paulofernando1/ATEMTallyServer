@@ -36,6 +36,7 @@ Tally Server Pro is a professional-grade, multi-protocol tally server designed f
 6. **Assign Role:** Select your camera role (Cam 1-41) directly from the mobile browser dropdown.
 
 ## 5. LED pins defined on default ESP firmware
+
 **ESP32:**
  
  LED1
@@ -48,7 +49,7 @@ Tally Server Pro is a professional-grade, multi-protocol tally server designed f
 2. GREEN = PIN 27
 3. BLUE = PIN 14
 
-4. **ESP8266:**
+**ESP8266:**
  
  LED1
 1. RED = PIN 16
