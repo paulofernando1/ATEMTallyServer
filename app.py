@@ -1022,7 +1022,7 @@ class TallyApp(ctk.CTk):
             "Allow Port 8080 (TCP) and 9910 (UDP) in Windows Firewall\n"
             "for external browsers and tally lights to connect.\n\n"
             "📝 Aditional notes:\n"
-            "Uses some libraries or parts of some libraries made by: SharkooJ / Kalinchuk  \n"
+            "Uses some libraries or parts of some libraries made by: SharkooJ / Kalinchuk / AronHetLam \n"
             "ATEM libraries for Arduino by SKAARHOJ \n"
             "Git Repo: https://github.com/kasperskaarhoj/SKAARHOJ-Open-Engineering \n"
             "Ideas and some code based on: ATEM_Wireless_Tally_Light \n"
