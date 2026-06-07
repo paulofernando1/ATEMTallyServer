@@ -5,6 +5,16 @@
 # --windowed ensure it runs as a GUI application
 # --clean clears the cache before building
 
-python -m PyInstaller --noconfirm --clean --onefile --windowed --add-data "static;static" --name "TallyServerEmulator" "app.py"
+python -m PyInstaller --noconfirm --clean --onefile --windowed `
+    --icon "Tally.ico" `
+    --add-data "static;static" `
+    --add-data "Tally.ico;." `
+    --add-data "Tally.png;." `
+    --add-data "Config.ico;." `
+    --add-data "Config.png;." `
+    --add-data "Help.ico;." `
+    --add-data "Help.png;." `
+    --name "TallyServerPro" `
+    "app.py"
 
-Write-Host "Build complete! The PORTABLE executable is located in the 'dist' directory as 'TallyServerEmulator.exe'."
+Write-Host "Build complete! The PORTABLE executable is located in the 'dist' directory as 'TallyServerPro.exe'."
