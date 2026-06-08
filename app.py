@@ -8,6 +8,8 @@
 # Version: 1.0.2
 # ==============================================================================
 
+from customtkinter.windows.widgets.image import ctk_image
+from customtkinter.windows.widgets.image import ctk_image
 import customtkinter as ctk
 import json
 import os
@@ -526,9 +528,19 @@ class TallyApp(ctk.CTk):
             ctk.CTkCheckBox(left_inner, text="AutoStart WebTallys Server", variable=self.var_auto_web_tally).pack(pady=5, padx=10, anchor="w")
             ctk.CTkCheckBox(left_inner, text="Auto Connect OBS", variable=self.var_auto_obs).pack(pady=5, padx=10, anchor="w")
             ctk.CTkCheckBox(left_inner, text="Auto Connect vMix", variable=self.var_auto_vmix).pack(pady=5, padx=10, anchor="w")
-            
+            ctk.CTkFrame(left_inner, fg_color="#334155", height=1).pack(fill="x", padx=10, pady=(10, 5))
+
             ctk.CTkLabel(left_inner, text="Version: V 1.0.2 Stable\nMax Capacity: up to 41 Tally Lights\n\nDeveloped by: Paulo Fernando", 
                           font=ctk.CTkFont(size=11), text_color=SUBTEXT_COLOR).pack(pady=20)
+            #Qrcode button
+            ctk.CTkButton(
+                left_inner,
+                text="Web QR Code",
+                height=35,
+                fg_color=ACCENT_COLOR,
+                hover_color="#2563eb",
+                command=self.open_qr_window
+            ).pack(pady=5, padx=10, fill="x")
 
             # --- RIGHT COL: TALLY MANAGEMENT ---
             right_f = ctk.CTkFrame(main_f, fg_color=PANEL_COLOR)
@@ -644,6 +656,102 @@ class TallyApp(ctk.CTk):
         ip = self.combo_tally_selector.get()
         if ip and ip != "No Tally Connected":
             webbrowser.open(f"http://{ip}/update")
+
+    def open_qr_window(self):
+        """Abre janela com QR Code do endereço Web Tally."""
+        import tkinter as tk
+        import socket
+        try:
+            import qrcode
+            # pyrefly: ignore [missing-import]
+            from PIL import ImageTk
+        except ImportError:
+            import tkinter.messagebox as mb
+            mb.showerror("Dependência ausente", 
+                        "Instale 'qrcode[pil]' para usar esta função.\n\npip install qrcode[pil]")
+            return
+
+        # --- Resolve IP local da máquina ---
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "127.0.0.1"
+
+        web_port = self.entry_web_port.get() or "8080"
+        url = f"http://{local_ip}:{web_port}"
+
+        # --- Gera QR Code ---
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=8,
+            border=4,
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="#0f172a", back_color="#f8fafc")
+
+        # --- Janela ---
+        qr_win = tk.Toplevel(self)
+        qr_win.title("Web Tally QR Code")
+        qr_win.configure(bg=BG_COLOR)
+        qr_win.resizable(False, False)
+        try:
+            qr_win.iconbitmap(resource_path("Tally.ico"))
+        except Exception:
+            pass
+        settings_win = self.focus_get().winfo_toplevel()
+        qr_win.transient(settings_win)
+
+        try:
+            settings_win.grab_release()
+        except Exception:
+            pass
+        qr_win.grab_set()
+        qr_win.lift()
+        qr_win.focus_force()
+
+        tk_img = ImageTk.PhotoImage(img)
+        # Mantém referência para evitar garbage collection
+        qr_win._qr_img_ref = tk_img
+
+        frame = ctk.CTkFrame(qr_win, fg_color=PANEL_COLOR, corner_radius=12)
+        frame.pack(padx=20, pady=20)
+
+        ctk.CTkLabel(frame, text="Scan to connect",
+                    font=ctk.CTkFont(size=14, weight="bold"),
+                    text_color=TEXT_WHITE).pack(pady=(15, 5))
+
+        lbl_url = ctk.CTkLabel(frame, text=url,
+                                font=ctk.CTkFont(size=12),
+                                text_color=ACCENT_COLOR)
+        lbl_url.pack(pady=(0, 10))
+
+        img_label = tk.Label(frame, image=tk_img, bg=PANEL_COLOR, bd=0)
+        img_label.pack(padx=20, pady=10)
+
+        if not self.is_web_server_active:
+            ctk.CTkLabel(frame, text="Web Tally is stopped",
+                        font=ctk.CTkFont(size=11),
+                        text_color="#f59e0b").pack(pady=(0, 5))
+        
+        def on_qr_close():
+            qr_win.grab_release()
+            qr_win.destroy()
+            # Devolve o foco ao settings
+            try:
+                settings_win.lift()
+                settings_win.grab_set()
+                settings_win.focus_force()
+            except Exception:
+                pass
+        qr_win.protocol("WM_DELETE_WINDOW", on_qr_close)
+        ctk.CTkButton(frame, text="Close", width=120,command=on_qr_close).pack(pady=(5, 15))
+        #qr_win.after(100, lambda: (qr_win.lift(), qr_win.focus_force()))
+            
 
     def handle_web_set_cam(self, data):
         sid = request.sid
