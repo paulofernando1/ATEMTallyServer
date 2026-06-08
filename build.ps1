@@ -14,6 +14,9 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed `
     --add-data "Config.png;." `
     --add-data "Help.ico;." `
     --add-data "Help.png;." `
+    --hidden-import "qrcode" `
+    --hidden-import "qrcode.image.pil" `
+    --hidden-import "PIL._tkinter_finder" `
     --name "TallyServerPro" `
     "app.py"
 

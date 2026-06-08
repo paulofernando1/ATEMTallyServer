@@ -90,7 +90,7 @@ OLED SDA = PIN 14
 
 To compile the application into a standalone portable `.exe`:
 1. Use Python 3.14 (or 3.10+).
-2. Install dependencies: `pip install customtkinter flask flask-socketio requests obsws-python websocket-client`.
+2. Install dependencies: `pip install customtkinter flask flask-socketio requests obsws-python websocket-client qrcode[pil]`.
 3. Run the build script:
    ```powershell
    powershell -ExecutionPolicy Bypass -File build.ps1
