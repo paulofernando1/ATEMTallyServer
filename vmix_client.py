@@ -77,7 +77,7 @@ class VmixTallyClient:
             tally_data = line.replace("TALLY OK ", "").strip()
             
             flags = []
-            for i in range(min(8, len(tally_data))):
+            for i in range(min(41, len(tally_data))):
                 state = tally_data[i]
                 if state == '1': # Program
                     flags.append(1)

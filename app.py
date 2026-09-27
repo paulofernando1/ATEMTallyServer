@@ -9,7 +9,6 @@
 # ==============================================================================
 
 from customtkinter.windows.widgets.image import ctk_image
-from customtkinter.windows.widgets.image import ctk_image
 import customtkinter as ctk
 import json
 import os
@@ -22,14 +21,47 @@ import engineio.async_drivers.threading # Force PyInstaller to bundle the thread
 from tally_server import TallyServer
 from vmix_client import VmixTallyClient
 from obs_client import ObsTallyClient
+from atem_client import AtemHardwareClient
+from tsl_client import TslUmdSender
+from roland_client import RolandTallyClient
+from osc_client import OscTallyBridge
+from serial_tally import SerialTallyDriver
 
-# --- STYLING CONSTANTS ---
-BG_COLOR = "#0f172a"          # Slate 900
-PANEL_COLOR = "#1e293b"       # Slate 800
-ACCENT_COLOR = "#3b82f6"      # Blue 500
-HEADER_BG = "#1e293b"         # Slate 800
-SUBTEXT_COLOR = "#94a3b8"     # Slate 400
-TEXT_WHITE = "#f8fafc"        # Slate 50
+# --- STYLING CONSTANTS (Adaptive Fluent/Zinc Light & Pro Dark Mode Tokens) ---
+BG_COLOR = ("#f4f4f5", "#09090b")            # Zinc 100 / Zinc 950 (True Neutral Pro Dark Canvas)
+PANEL_COLOR = ("#ffffff", "#18181b")         # Pure White / Zinc 900 (Elevated Surface)
+HEADER_BG = ("#e4e4e7", "#121214")           # Zinc 200 / Deep Charcoal 
+CARD_LEFT = ("#ffffff", "#1c1c1f")           # Left cards container surface
+CARD_RIGHT = ("#ffffff", "#18181b")          # Right cards container surface
+BORDER_COLOR = ("#cbd5e1", "#27272a")        # Zinc/Slate subtle border
+BORDER_SUBTLE = ("#e2e8f0", "#202024")       # Extra subtle divider
+
+# Typography Tokens
+TEXT_PRIMARY = ("#09090b", "#f4f4f5")        # Zinc 950 / Zinc 50 (High contrast text)
+TEXT_WHITE = TEXT_PRIMARY                    # Backward compatibility alias
+SUBTEXT_COLOR = ("#52525b", "#a1a1aa")       # Zinc 600 / Zinc 400 (Readable muted)
+TEXTBOX_BG = ("#f8fafc", "#121214")          # Textbox background
+ROW_BG = ("#f8fafc", "#1f1f23")              # Dynamic table/list row background
+
+# Refined Professional Brand & Semantic Colors (Darker, richer blues)
+ACCENT_COLOR = ("#1d4ed8", "#2563eb")        # Royal Blue 700 (Light) / Blue 600 (Dark)
+ACCENT_HOVER = ("#1e40af", "#1d4ed8")        # Blue 800 (Light) / Blue 700 (Dark)
+HEADER_HOVER = ("#d4d4d8", "#27272a")        # Zinc 300 / Zinc 800
+
+# Tally / Status Semantic Colors
+COLOR_PROG = "#dc2626"                       # Red 600 (Program / On-Air)
+COLOR_PROG_HOVER = "#b91c1c"                 # Red 700
+COLOR_PREV = "#16a34a"                       # Green 600 (Preview)
+COLOR_PREV_HOVER = "#15803d"                 # Green 700
+COLOR_ATT = ("#1d4ed8", "#2563eb")           # Deep Blue 700/600 (Attention/Aux)
+COLOR_ATT_HOVER = ("#1e40af", "#1d4ed8")
+
+# Button State Tokens
+BTN_INACTIVE_BG = ("#e4e4e7", "#27272a")     # Inactive button background
+BTN_INACTIVE_TEXT = ("#3f3f46", "#a1a1aa")   # Inactive button text
+BTN_INACTIVE_HOVER = ("#d4d4d8", "#3f3f46")  # Inactive button hover
+BTN_OFF_ACTIVE = ("#cbd5e1", "#3f3f46")      # Active 'Off' button background
+BTN_OFF_TEXT = ("#09090b", "#f4f4f5")        # Active 'Off' button text
 
 # --- SILENCE STDOUT/STDERR FOR WINDOWED MODE (CRITICAL FOR FLASK) ---
 import sys
@@ -46,6 +78,58 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
+def apply_windows_titlebar_theme(window, dark_mode=True, bg_hex=None, text_hex=None, border_hex=None):
+    """ Customizes the native Windows 10/11 system titlebar (DWM) """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        window.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+        if not hwnd:
+            hwnd = window.winfo_id()
+
+        # 1. Immersive Dark Mode for Windows 10 (1809+) & Windows 11
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
+        val = ctypes.c_int(1 if dark_mode else 0)
+        res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(val), ctypes.sizeof(val)
+        )
+        if res != 0:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ctypes.byref(val), ctypes.sizeof(val)
+            )
+
+        # 2. Windows 11 Custom Titlebar Colors
+        def hex_to_dword(h):
+            h = h.lstrip("#")
+            if len(h) == 6:
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                return (b << 16) | (g << 8) | r
+            return 0
+
+        if bg_hex:
+            DWMWA_CAPTION_COLOR = 35
+            c_bg = ctypes.c_uint(hex_to_dword(bg_hex))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_CAPTION_COLOR, ctypes.byref(c_bg), ctypes.sizeof(c_bg)
+            )
+        if text_hex:
+            DWMWA_TEXT_COLOR = 36
+            c_txt = ctypes.c_uint(hex_to_dword(text_hex))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_TEXT_COLOR, ctypes.byref(c_txt), ctypes.sizeof(c_txt)
+            )
+        if border_hex:
+            DWMWA_BORDER_COLOR = 34
+            c_brd = ctypes.c_uint(hex_to_dword(border_hex))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_BORDER_COLOR, ctypes.byref(c_brd), ctypes.sizeof(c_brd)
+            )
+    except Exception:
+        pass
+
 class TallyApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -53,9 +137,12 @@ class TallyApp(ctk.CTk):
         self.title("Tally Server Pro")
         self.geometry("1150x700")
         self.configure(fg_color=BG_COLOR)
-        self.iconbitmap(resource_path("Tally.ico"))
+        try:
+            self.iconbitmap(resource_path("Tally.ico"))
+        except Exception:
+            pass
         self.remotedisplay_radio_var = ctk.IntVar(self, value=0)
-        
+
         # --- STATE ---
         self.config_file = "config.json"
         # Initialize Tally Server on port 9910 with 41 sources (required for display)
@@ -66,27 +153,45 @@ class TallyApp(ctk.CTk):
         self.server.set_tally_sources(120) # Support many tallies + display/message indices
         self.vmix_client = None
         self.obs_client = None
+        self.atem_client = None
+        self.tsl_sender = None
+        self.roland_client = None
+        self.osc_bridge = None
+        self.serial_driver = None
         
         self.is_server_running = False
         self.is_vmix_connected = False
         self.is_obs_connected = False
+        self.is_atem_connected = False
+        self.is_tsl_active = False
+        self.is_roland_connected = False
+        self.is_osc_active = False
+        self.is_serial_active = False
         
         # --- PERSISTENT VARS ---
         self.var_save_on_exit = ctk.BooleanVar(value=True)
         self.var_auto_server = ctk.BooleanVar(value=False)
         self.var_auto_vmix = ctk.BooleanVar(value=False)
         self.var_auto_obs = ctk.BooleanVar(value=False)
+        self.var_auto_atem = ctk.BooleanVar(value=False)
+        self.var_auto_tsl = ctk.BooleanVar(value=False)
+        self.var_auto_roland = ctk.BooleanVar(value=False)
+        self.var_auto_osc = ctk.BooleanVar(value=False)
+        self.var_auto_serial = ctk.BooleanVar(value=False)
         self.var_touch_mode = ctk.BooleanVar(value=False)
         self.var_save_window = ctk.BooleanVar(value=True)
         self.var_remotedisplay_mode = ctk.BooleanVar(value=False)
         self.var_auto_web_tally = ctk.BooleanVar(value=False)
         self.var_obs_match_type = ctk.StringVar(value="Automatico")
+        self.var_theme = ctk.StringVar(value="Dark")
         
         # --- WINDOW STATE PERSISTENCE ---
         self.last_w = 1150
         self.last_h = 700
+        self.window_state = "normal"
         self.settings_w = 780
         self.settings_h = 560
+        self.bind("<Configure>", self._on_configure)
         
         # --- WEB TALLY STATE ---
         # Initialize Flask with a static folder for local assets (Offline Support)
@@ -126,10 +231,31 @@ class TallyApp(ctk.CTk):
 
         self.setup_ui()
         self.load_config()
+        self.apply_titlebar()
         
         # Mandatory UI refresh to prevent black screens on some systems
         self.update()
 
+
+    def _on_configure(self, event):
+        if event.widget == self:
+            try:
+                st = self.state()
+                if st == "normal":
+                    w = self.winfo_width()
+                    h = self.winfo_height()
+                    if w > 200 and h > 200:
+                        self.last_w = w
+                        self.last_h = h
+            except Exception:
+                pass
+
+    def apply_titlebar(self):
+        is_dark = ctk.get_appearance_mode() == "Dark"
+        bg_hex = "#121214" if is_dark else "#e4e4e7"
+        text_hex = "#f4f4f5" if is_dark else "#09090b"
+        border_hex = "#27272a" if is_dark else "#cbd5e1"
+        self.after(100, lambda: apply_windows_titlebar_theme(self, dark_mode=is_dark, bg_hex=bg_hex, text_hex=text_hex, border_hex=border_hex))
 
 
     def setup_ui(self):
@@ -138,19 +264,24 @@ class TallyApp(ctk.CTk):
         self.header.pack(fill="x", side="top")
         
         self.lbl_header = ctk.CTkLabel(self.header, text="📡 Tally Server Pro", 
-                                     font=ctk.CTkFont(size=20, weight="bold"), text_color=TEXT_WHITE)
+                                     font=ctk.CTkFont(size=20, weight="bold"), text_color=TEXT_PRIMARY)
         self.lbl_header.pack(side="left", padx=20, pady=10)
         self.broadcast_scheduled = False
 
         self.btn_settings = ctk.CTkButton(self.header, text="⚙️ Settings", width=100, 
                                         command=self.open_settings_menu,
-                                        fg_color="transparent", hover_color="#334155")
+                                        fg_color="transparent", hover_color=HEADER_HOVER, text_color=TEXT_PRIMARY)
         self.btn_settings.pack(side="right", padx=10)
+
+        self.btn_theme_toggle = ctk.CTkButton(self.header, text="🌓 Theme", width=80,
+                                             command=self.toggle_theme_mode,
+                                             fg_color="transparent", hover_color=HEADER_HOVER, text_color=TEXT_PRIMARY)
+        self.btn_theme_toggle.pack(side="right", padx=5)
 
         self.btn_help = ctk.CTkButton(self.header, text="❓ Help", width=80, 
                                      command=self.open_help_menu,
-                                     fg_color="transparent", hover_color="#334155")
-        self.btn_help.pack(side="right", padx=10)
+                                     fg_color="transparent", hover_color=HEADER_HOVER, text_color=TEXT_PRIMARY)
+        self.btn_help.pack(side="right", padx=5)
 
         # 2. MAIN CONTAINER
         self.main_container = ctk.CTkFrame(self, fg_color="transparent")
@@ -189,7 +320,7 @@ class TallyApp(ctk.CTk):
         self.entry_remotedisplay_msg.pack(side="left", expand=True, fill="x", padx=(0,5))
         self.btn_remotedisplay_send = ctk.CTkButton(msg_f, text="SEND ➤", width=80, height=35, 
                                           font=ctk.CTkFont(size=12, weight="bold"),
-                                          fg_color="#10b981", hover_color="#059669", 
+                                          fg_color="#10b981", hover_color="#059669", text_color="#ffffff",
                                           command=self.send_remotedisplay_command,
                                           state="disabled")
         self.btn_remotedisplay_send.pack(side="right")
@@ -200,7 +331,8 @@ class TallyApp(ctk.CTk):
         self.entry_port = ctk.CTkEntry(row_server, width=80)
         self.entry_port.insert(0, "9910")
         self.entry_port.pack(side="right")
-        self.btn_toggle_server = ctk.CTkButton(self.server_card, text="Start Server", command=self.toggle_server, height=35)
+        self.btn_toggle_server = ctk.CTkButton(self.server_card, text="Start Server", command=self.toggle_server, height=35,
+                                              fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
         self.btn_toggle_server.pack(pady=(10, 15), padx=10, fill="x")
 
         # Nested Web Tally Controls (No Title)
@@ -208,13 +340,23 @@ class TallyApp(ctk.CTk):
         self.entry_web_port = ctk.CTkEntry(row_web, width=80)
         self.entry_web_port.insert(0, "8080")
         self.entry_web_port.pack(side="right")
-        self.btn_toggle_web_server = ctk.CTkButton(self.server_card, text="Start Web Tally", command=self.toggle_web_server, height=35)
+        self.btn_toggle_web_server = ctk.CTkButton(self.server_card, text="Start Web Tally", command=self.toggle_web_server, height=35,
+                                                  fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
         self.btn_toggle_web_server.pack(pady=(10, 5), padx=10, fill="x")
         
         self.lbl_web_status = ctk.CTkLabel(self.server_card, text="● Web Tally: Stopped", font=ctk.CTkFont(size=11), text_color=SUBTEXT_COLOR)
         self.lbl_web_status.pack(pady=(0, 10))
 
-        # 3. vMix
+        # 3. ATEM Switcher (Hardware Input)
+        self.atem_card = self.create_card(self.left_col, "ATEM Switcher (Input)")
+        row_atem_ip = self.create_input_row(self.atem_card, "Switcher IP:")
+        self.entry_atem_host = ctk.CTkEntry(row_atem_ip, width=140)
+        self.entry_atem_host.pack(side="right")
+        self.btn_atem_connect = ctk.CTkButton(self.atem_card, text="Connect ATEM", command=self.toggle_atem, height=35,
+                                             fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+        self.btn_atem_connect.pack(pady=(10, 15), padx=10, fill="x")
+
+        # 4. vMix
         self.vmix_card = self.create_card(self.left_col, "vMix Integration")
         row_vmix_ip = self.create_input_row(self.vmix_card, "Server IP:")
         self.entry_vmix_host = ctk.CTkEntry(row_vmix_ip, width=140)
@@ -225,10 +367,11 @@ class TallyApp(ctk.CTk):
         self.entry_vmix_port.insert(0, "8099")
         self.entry_vmix_port.pack(side="right")
         
-        self.btn_vmix_connect = ctk.CTkButton(self.vmix_card, text="Connect vMix", command=self.toggle_vmix, height=35)
+        self.btn_vmix_connect = ctk.CTkButton(self.vmix_card, text="Connect vMix", command=self.toggle_vmix, height=35,
+                                             fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
         self.btn_vmix_connect.pack(pady=(10, 15), padx=10, fill="x")
 
-        # 4. OBS
+        # 5. OBS
         self.obs_card = self.create_card(self.left_col, "OBS Integration")
         row_obs_ip = self.create_input_row(self.obs_card, "Server IP:")
         self.entry_obs_host = ctk.CTkEntry(row_obs_ip, width=140)
@@ -248,11 +391,72 @@ class TallyApp(ctk.CTk):
         self.combo_obs_match.set("Auto")
         self.combo_obs_match.pack(side="right")
         
-        self.btn_obs_connect = ctk.CTkButton(self.obs_card, text="Connect OBS", command=self.toggle_obs, height=35)
+        self.btn_obs_connect = ctk.CTkButton(self.obs_card, text="Connect OBS", command=self.toggle_obs, height=35,
+                                            fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
         self.btn_obs_connect.pack(pady=(15, 15), padx=10, fill="x")
 
+        # 6. Roland Switcher (Hardware Input)
+        self.roland_card = self.create_card(self.left_col, "Roland Switcher (Input)")
+        row_roland_ip = self.create_input_row(self.roland_card, "Switcher IP:")
+        self.entry_roland_host = ctk.CTkEntry(row_roland_ip, width=140)
+        self.entry_roland_host.pack(side="right")
+        row_roland_port = self.create_input_row(self.roland_card, "TCP Port:")
+        self.entry_roland_port = ctk.CTkEntry(row_roland_port, width=80)
+        self.entry_roland_port.insert(0, "8023")
+        self.entry_roland_port.pack(side="right")
+        self.btn_roland_connect = ctk.CTkButton(self.roland_card, text="Connect Roland", command=self.toggle_roland, height=35,
+                                               fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+        self.btn_roland_connect.pack(pady=(10, 15), padx=10, fill="x")
+
+        # 7. Hollyland / TSL UMD 3.1 (Output)
+        self.tsl_card = self.create_card(self.left_col, "Hollyland / TSL UMD (Output)")
+        row_tsl_ip = self.create_input_row(self.tsl_card, "Target IP:")
+        self.entry_tsl_host = ctk.CTkEntry(row_tsl_ip, width=140)
+        self.entry_tsl_host.insert(0, "255.255.255.255")
+        self.entry_tsl_host.pack(side="right")
+        row_tsl_port = self.create_input_row(self.tsl_card, "TSL Port:")
+        self.entry_tsl_port = ctk.CTkEntry(row_tsl_port, width=80)
+        self.entry_tsl_port.insert(0, "8900")
+        self.entry_tsl_port.pack(side="right")
+        self.btn_tsl_toggle = ctk.CTkButton(self.tsl_card, text="Enable TSL 3.1 (Hollyland)", command=self.toggle_tsl, height=35,
+                                           fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+        self.btn_tsl_toggle.pack(pady=(10, 15), padx=10, fill="x")
+
+        # 8. OSC Universal Bridge (In/Out)
+        self.osc_card = self.create_card(self.left_col, "OSC Universal Bridge (In/Out)")
+        row_osc_ip = self.create_input_row(self.osc_card, "Target IP:")
+        self.entry_osc_host = ctk.CTkEntry(row_osc_ip, width=140)
+        self.entry_osc_host.insert(0, "255.255.255.255")
+        self.entry_osc_host.pack(side="right")
+        row_osc_send = self.create_input_row(self.osc_card, "Send Port:")
+        self.entry_osc_port = ctk.CTkEntry(row_osc_send, width=80)
+        self.entry_osc_port.insert(0, "9000")
+        self.entry_osc_port.pack(side="right")
+        row_osc_listen = self.create_input_row(self.osc_card, "Listen Port:")
+        self.entry_osc_listen = ctk.CTkEntry(row_osc_listen, width=80)
+        self.entry_osc_listen.insert(0, "8000")
+        self.entry_osc_listen.pack(side="right")
+        self.btn_osc_toggle = ctk.CTkButton(self.osc_card, text="Enable OSC Bridge", command=self.toggle_osc, height=35,
+                                           fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+        self.btn_osc_toggle.pack(pady=(10, 15), padx=10, fill="x")
+
+        # 9. USB Serial / Relay (Output)
+        self.serial_card = self.create_card(self.left_col, "USB Serial & Relays (Output)")
+        row_serial_port = self.create_input_row(self.serial_card, "COM Port:")
+        avail_ports = SerialTallyDriver.get_available_ports()
+        self.combo_serial_port = ctk.CTkComboBox(row_serial_port, values=avail_ports, width=120)
+        self.combo_serial_port.set(avail_ports[0])
+        self.combo_serial_port.pack(side="right")
+        row_serial_proto = self.create_input_row(self.serial_card, "Protocol:")
+        self.combo_serial_proto = ctk.CTkComboBox(row_serial_proto, values=["Arduino", "USB_Relay"], width=120)
+        self.combo_serial_proto.set("Arduino")
+        self.combo_serial_proto.pack(side="right")
+        self.btn_serial_toggle = ctk.CTkButton(self.serial_card, text="Enable USB Serial", command=self.toggle_serial, height=35,
+                                              fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+        self.btn_serial_toggle.pack(pady=(10, 15), padx=10, fill="x")
+
         # --- RIGHT COL: MONITORING ---
-        self.right_col = ctk.CTkFrame(self.main_container, fg_color=PANEL_COLOR)
+        self.right_col = ctk.CTkFrame(self.main_container, fg_color=PANEL_COLOR, border_width=1, border_color=BORDER_COLOR, corner_radius=8)
         self.right_col.grid(row=0, column=1, sticky="nsew")
         
         # Swap: Web Tally Clients Section Before Active Network Clients
@@ -266,7 +470,7 @@ class TallyApp(ctk.CTk):
         # Clients panel
         self.clients_card = self.create_card(self.right_col, "Active Network Clients")
         self.clients_card.pack(fill="x", side="bottom", padx=20, pady=(0, 20))
-        self.txt_clients = ctk.CTkTextbox(self.clients_card, height=80, fg_color="#0f172a", border_width=0, font=("Consolas", 12))
+        self.txt_clients = ctk.CTkTextbox(self.clients_card, height=80, fg_color=TEXTBOX_BG, text_color=TEXT_PRIMARY, border_width=1, border_color=BORDER_COLOR, font=("Consolas", 12))
         self.txt_clients.pack(fill="both", expand=True, padx=5, pady=5)
         self.txt_clients.configure(state="disabled")
         
@@ -280,7 +484,7 @@ class TallyApp(ctk.CTk):
         # Add Tally Button relocated OUTSIDE the table and AFTER the title
         self.btn_add_tally = ctk.CTkButton(self.right_header_frame, text="➕ Add Tally Light Row", 
                                         fg_color="transparent", border_width=1, border_color=ACCENT_COLOR,
-                                        hover_color="#1d4ed8", command=self.on_click_add_row)
+                                        hover_color=ACCENT_HOVER, text_color=ACCENT_COLOR, command=self.on_click_add_row)
         self.btn_add_tally.pack(side="right")
 
         # Table with Grid for perfect alignment
@@ -299,14 +503,14 @@ class TallyApp(ctk.CTk):
         self.header_row.grid_columnconfigure(4, minsize=120) # Status
         self.header_row.grid_columnconfigure(5, minsize=40)  # Action (Delete)
         
-        ctk.CTkLabel(self.header_row, text="#", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0)
-        ctk.CTkLabel(self.header_row, text="Scene Name", font=ctk.CTkFont(weight="bold"), anchor="w").grid(row=0, column=1, padx=10, sticky="w")
-        ctk.CTkLabel(self.header_row, text="Main Tally (LED 1)", font=ctk.CTkFont(weight="bold")).grid(row=0, column=2, sticky="nsew")
-        ctk.CTkLabel(self.header_row, text="LED 2 RGB", font=ctk.CTkFont(weight="bold")).grid(row=0, column=3, sticky="nsew")
-        ctk.CTkLabel(self.header_row, text="Status", font=ctk.CTkFont(weight="bold")).grid(row=0, column=4, sticky="nsew")
+        ctk.CTkLabel(self.header_row, text="#", font=ctk.CTkFont(weight="bold"), text_color=TEXT_PRIMARY).grid(row=0, column=0)
+        ctk.CTkLabel(self.header_row, text="Scene Name", font=ctk.CTkFont(weight="bold"), text_color=TEXT_PRIMARY, anchor="w").grid(row=0, column=1, padx=10, sticky="w")
+        ctk.CTkLabel(self.header_row, text="Main Tally (LED 1)", font=ctk.CTkFont(weight="bold"), text_color=TEXT_PRIMARY).grid(row=0, column=2, sticky="nsew")
+        ctk.CTkLabel(self.header_row, text="LED 2 RGB", font=ctk.CTkFont(weight="bold"), text_color=TEXT_PRIMARY).grid(row=0, column=3, sticky="nsew")
+        ctk.CTkLabel(self.header_row, text="Status", font=ctk.CTkFont(weight="bold"), text_color=TEXT_PRIMARY).grid(row=0, column=4, sticky="nsew")
         ctk.CTkLabel(self.header_row, text="", width=40).grid(row=0, column=5) # Placeholder for trash bin alignment
 
-        ctk.CTkFrame(self.table_container, height=2, fg_color=BG_COLOR).pack(fill="x", pady=5)
+        ctk.CTkFrame(self.table_container, height=1, fg_color=BORDER_COLOR).pack(fill="x", pady=5)
 
         # Scrollable container for rows
         self.rows_scroll = ctk.CTkScrollableFrame(self.table_container, fg_color="transparent")
@@ -353,7 +557,7 @@ class TallyApp(ctk.CTk):
         
         self.tally_rows_widgets.append(row)
         
-        ctk.CTkLabel(row, text=str(i+1), font=ctk.CTkFont(weight="bold")).grid(row=0, column=0)
+        ctk.CTkLabel(row, text=str(i+1), font=ctk.CTkFont(weight="bold"), text_color=TEXT_PRIMARY).grid(row=0, column=0)
         ent = ctk.CTkEntry(row, textvariable=self.tally_scene_vars[i], height=30)
         ent.grid(row=0, column=1, padx=5, sticky="ew")
         
@@ -361,13 +565,13 @@ class TallyApp(ctk.CTk):
         f1 = ctk.CTkFrame(row, fg_color="transparent")
         f1.grid(row=0, column=2)
         
-        o_btn = ctk.CTkButton(f1, text="Off", width=60, height=30, fg_color="#334155", command=lambda idx=i: self.set_led1_state(idx, "Off"))
+        o_btn = ctk.CTkButton(f1, text="Off", width=60, height=30, fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER, command=lambda idx=i: self.set_led1_state(idx, "Off"))
         o_btn.pack(side="left", padx=2)
-        p_btn = ctk.CTkButton(f1, text="Prog", width=60, height=30, fg_color="#334155", command=lambda idx=i: self.set_led1_state(idx, "Prog"))
+        p_btn = ctk.CTkButton(f1, text="Prog", width=60, height=30, fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER, command=lambda idx=i: self.set_led1_state(idx, "Prog"))
         p_btn.pack(side="left", padx=2)
-        v_btn = ctk.CTkButton(f1, text="Prev", width=60, height=30, fg_color="#334155", command=lambda idx=i: self.set_led1_state(idx, "Prev"))
+        v_btn = ctk.CTkButton(f1, text="Prev", width=60, height=30, fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER, command=lambda idx=i: self.set_led1_state(idx, "Prev"))
         v_btn.pack(side="left", padx=2)
-        a_btn = ctk.CTkButton(f1, text="ATT", width=60, height=30, fg_color="#334155", command=lambda idx=i: self.set_led1_state(idx, "ATT"))
+        a_btn = ctk.CTkButton(f1, text="ATT", width=60, height=30, fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER, command=lambda idx=i: self.set_led1_state(idx, "ATT"))
         a_btn.pack(side="left", padx=2)
 
         self.tally_btn_led1_off.append(o_btn)
@@ -378,23 +582,23 @@ class TallyApp(ctk.CTk):
         f2 = ctk.CTkFrame(row, fg_color="transparent")
         f2.grid(row=0, column=3)
         
-        r_btn = ctk.CTkButton(f2, text="R", width=30, height=30, fg_color="#334155", command=lambda idx=i: self.toggle_led2_color(idx, "R"))
+        r_btn = ctk.CTkButton(f2, text="R", width=30, height=30, fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER, command=lambda idx=i: self.toggle_led2_color(idx, "R"))
         r_btn.pack(side="left", padx=2)
-        g_btn = ctk.CTkButton(f2, text="G", width=30, height=30, fg_color="#334155", command=lambda idx=i: self.toggle_led2_color(idx, "G"))
+        g_btn = ctk.CTkButton(f2, text="G", width=30, height=30, fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER, command=lambda idx=i: self.toggle_led2_color(idx, "G"))
         g_btn.pack(side="left", padx=2)
-        b_btn = ctk.CTkButton(f2, text="B", width=30, height=30, fg_color="#334155", command=lambda idx=i: self.toggle_led2_color(idx, "B"))
+        b_btn = ctk.CTkButton(f2, text="B", width=30, height=30, fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER, command=lambda idx=i: self.toggle_led2_color(idx, "B"))
         b_btn.pack(side="left", padx=2)
         
         self.tally_btn_led2_r.append(r_btn)
         self.tally_btn_led2_g.append(g_btn)
         self.tally_btn_led2_b.append(b_btn)
         
-        orb = ctk.CTkLabel(row, text="● Idle", text_color="#64748b", font=ctk.CTkFont(size=11))
+        orb = ctk.CTkLabel(row, text="● Idle", text_color=SUBTEXT_COLOR, font=ctk.CTkFont(size=11))
         orb.grid(row=0, column=4)
         self.tally_status_orbs.append(orb)
 
-        btn_del = ctk.CTkButton(row, text="X", width=24, height=24, fg_color="#ef4444", 
-                               hover_color="#991b1b", font=ctk.CTkFont(size=10, weight="bold"),
+        btn_del = ctk.CTkButton(row, text="✕", width=24, height=24, fg_color="#dc2626", 
+                               hover_color="#991b1b", text_color="#ffffff", font=ctk.CTkFont(size=10, weight="bold"),
                                command=lambda idx=i: self.remove_tally_row(idx))
         btn_del.grid(row=0, column=5, padx=5, sticky="e")
         
@@ -456,14 +660,15 @@ class TallyApp(ctk.CTk):
         except Exception as e:
             print(f"REBUILD ERROR: {e}")
     def create_card(self, parent, title):
-        card = ctk.CTkFrame(parent, fg_color="#334155" if parent == self.left_col else "#0f172a")
-        card.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=12, weight="bold"), text_color=ACCENT_COLOR).pack(pady=(5, 0), padx=10, anchor="w")
+        card_bg = CARD_LEFT if parent == self.left_col else CARD_RIGHT
+        card = ctk.CTkFrame(parent, fg_color=card_bg, border_width=1, border_color=BORDER_COLOR, corner_radius=8)
+        card.pack(fill="x", padx=10, pady=8)
+        ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=12, weight="bold"), text_color=ACCENT_COLOR).pack(pady=(8, 2), padx=12, anchor="w")
         return card
 
     def create_input_row(self, parent, label):
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(pady=5, fill="x", padx=10)
+        row.pack(pady=4, fill="x", padx=10)
         ctk.CTkLabel(row, text=label, text_color=SUBTEXT_COLOR).pack(side="left")
         return row
 
@@ -483,7 +688,8 @@ class TallyApp(ctk.CTk):
             win.minsize(780, 560)
             
             win.resizable(True, True)
-            win.configure(bg=BG_COLOR)
+            current_mode = ctk.get_appearance_mode()
+            win.configure(bg="#f4f4f5" if current_mode == "Light" else "#09090b")
             try:
                 win.iconbitmap(resource_path("Config.ico"))
             except Exception:
@@ -506,20 +712,20 @@ class TallyApp(ctk.CTk):
             win.protocol("WM_DELETE_WINDOW", on_settings_close)
             
             # Pack Close button first at the bottom so it never gets squeezed
-            close_btn = ctk.CTkButton(main_container_f, text="Close", command=on_settings_close)
+            close_btn = ctk.CTkButton(main_container_f, text="Close", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff", command=on_settings_close)
             close_btn.pack(side="bottom", pady=10)
             
             main_f = ctk.CTkFrame(main_container_f, fg_color="transparent")
             main_f.pack(side="top", fill="both", expand=True, padx=20, pady=10)
             
             # --- LEFT COL: PREFERENCES ---
-            left_f = ctk.CTkFrame(main_f, fg_color=PANEL_COLOR)
+            left_f = ctk.CTkFrame(main_f, fg_color=PANEL_COLOR, border_width=1, border_color=BORDER_COLOR, corner_radius=8)
             left_f.pack(side="left", fill="both", expand=True, padx=(0, 10))
             # Use inner frame for padding if needed, or just pack with padx/pady
             left_inner = ctk.CTkFrame(left_f, fg_color="transparent")
             left_inner.pack(fill="both", expand=True, padx=15, pady=15)
             
-            ctk.CTkLabel(left_inner, text="⚙️ Preferences", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+            ctk.CTkLabel(left_inner, text="⚙️ Preferences", font=ctk.CTkFont(size=18, weight="bold"), text_color=TEXT_PRIMARY).pack(pady=10)
             ctk.CTkCheckBox(left_inner, text="Save Config on Exit", variable=self.var_save_on_exit).pack(pady=5, padx=10, anchor="w")
             ctk.CTkCheckBox(left_inner, text="Save Window Sizes", variable=self.var_save_window).pack(pady=5, padx=10, anchor="w")
             ctk.CTkCheckBox(left_inner, text="Enable Remote Displays", variable=self.var_remotedisplay_mode, command=self.toggle_remotedisplay_ui).pack(pady=5, padx=10, anchor="w")
@@ -528,27 +734,41 @@ class TallyApp(ctk.CTk):
             ctk.CTkCheckBox(left_inner, text="AutoStart WebTallys Server", variable=self.var_auto_web_tally).pack(pady=5, padx=10, anchor="w")
             ctk.CTkCheckBox(left_inner, text="Auto Connect OBS", variable=self.var_auto_obs).pack(pady=5, padx=10, anchor="w")
             ctk.CTkCheckBox(left_inner, text="Auto Connect vMix", variable=self.var_auto_vmix).pack(pady=5, padx=10, anchor="w")
-            ctk.CTkFrame(left_inner, fg_color="#334155", height=1).pack(fill="x", padx=10, pady=(10, 5))
+            ctk.CTkCheckBox(left_inner, text="Auto Connect ATEM Switcher", variable=self.var_auto_atem).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Auto Connect Roland Switcher", variable=self.var_auto_roland).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Auto Enable TSL 3.1 (Hollyland)", variable=self.var_auto_tsl).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Auto Enable OSC Bridge", variable=self.var_auto_osc).pack(pady=5, padx=10, anchor="w")
+            ctk.CTkCheckBox(left_inner, text="Auto Enable USB Serial", variable=self.var_auto_serial).pack(pady=5, padx=10, anchor="w")
+            
+            row_theme = ctk.CTkFrame(left_inner, fg_color="transparent")
+            row_theme.pack(pady=8, padx=10, fill="x")
+            ctk.CTkLabel(row_theme, text="UI Theme Mode:", text_color=TEXT_PRIMARY).pack(side="left")
+            self.combo_theme = ctk.CTkComboBox(row_theme, values=["Dark", "Light", "System"], width=110, command=self.set_theme_mode)
+            self.combo_theme.set(self.var_theme.get())
+            self.combo_theme.pack(side="right")
+            
+            ctk.CTkFrame(left_inner, fg_color=BORDER_COLOR, height=1).pack(fill="x", padx=10, pady=(10, 5))
 
             ctk.CTkLabel(left_inner, text="Version: V 1.0.2 Stable\nMax Capacity: up to 41 Tally Lights\n\nDeveloped by: Paulo Fernando", 
                           font=ctk.CTkFont(size=11), text_color=SUBTEXT_COLOR).pack(pady=20)
-            #Qrcode button
+            # Qrcode button
             ctk.CTkButton(
                 left_inner,
-                text="Web QR Code",
+                text="📱 Web QR Code",
                 height=35,
                 fg_color=ACCENT_COLOR,
-                hover_color="#2563eb",
+                hover_color=ACCENT_HOVER,
+                text_color="#ffffff",
                 command=self.open_qr_window
             ).pack(pady=5, padx=10, fill="x")
 
             # --- RIGHT COL: TALLY MANAGEMENT ---
-            right_f = ctk.CTkFrame(main_f, fg_color=PANEL_COLOR)
+            right_f = ctk.CTkFrame(main_f, fg_color=PANEL_COLOR, border_width=1, border_color=BORDER_COLOR, corner_radius=8)
             right_f.pack(side="right", fill="both", expand=True)
             right_inner = ctk.CTkFrame(right_f, fg_color="transparent")
             right_inner.pack(fill="both", expand=True, padx=15, pady=15)
             
-            ctk.CTkLabel(right_inner, text="📡 Tally Management", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
+            ctk.CTkLabel(right_inner, text="📡 Tally Management", font=ctk.CTkFont(size=18, weight="bold"), text_color=TEXT_PRIMARY).pack(pady=10)
             
             # Thread-safe client list access - include direct and repeater clients
             try:
@@ -571,7 +791,7 @@ class TallyApp(ctk.CTk):
             self.combo_tally_selector = ctk.CTkComboBox(right_inner, values=self.tally_ips, width=200, command=self.on_tally_device_selected)
             self.combo_tally_selector.pack(pady=10)
             
-            self.info_tally_card = ctk.CTkFrame(right_inner, fg_color=BG_COLOR, corner_radius=8)
+            self.info_tally_card = ctk.CTkFrame(right_inner, fg_color=TEXTBOX_BG, border_width=1, border_color=BORDER_COLOR, corner_radius=8)
             self.info_tally_card.pack(fill="both", expand=True, pady=10)
             
             self.lbl_tally_info = ctk.CTkLabel(self.info_tally_card, text="Select a Tally Light\nto view details", 
@@ -583,11 +803,12 @@ class TallyApp(ctk.CTk):
             
             # Centralize and swap buttons: Update Info Left, Firmware Update Right
             self.btn_refresh_tally = ctk.CTkButton(btn_f, text="Update Info", width=140, height=35, 
-                                                   fg_color=PANEL_COLOR, border_width=1, border_color="#475569",
+                                                   fg_color=PANEL_COLOR, text_color=TEXT_PRIMARY, border_width=1, border_color=BORDER_COLOR,
+                                                   hover_color=HEADER_HOVER,
                                                    command=lambda: self.on_tally_device_selected(self.combo_tally_selector.get()))
             self.btn_refresh_tally.pack(side="left", expand=True, padx=5)
 
-            self.btn_ota_update = ctk.CTkButton(btn_f, text="🚀 Firmware Update", fg_color="#10b981", state="disabled",
+            self.btn_ota_update = ctk.CTkButton(btn_f, text="🚀 Firmware Update", fg_color="#10b981", hover_color="#059669", text_color="#ffffff", state="disabled",
                                                height=35, width=140, command=self.open_tally_ota_page)
             self.btn_ota_update.pack(side="left", expand=True, padx=5)
             
@@ -642,7 +863,7 @@ class TallyApp(ctk.CTk):
                     )
                     
                     self.after(0, lambda: [
-                        self.lbl_tally_info.configure(text=info, text_color=TEXT_WHITE, justify="left"),
+                        self.lbl_tally_info.configure(text=info, text_color=TEXT_PRIMARY, justify="left"),
                         self.btn_ota_update.configure(state="normal")
                     ])
                 else:
@@ -692,12 +913,13 @@ class TallyApp(ctk.CTk):
         )
         qr.add_data(url)
         qr.make(fit=True)
-        img = qr.make_image(fill_color="#0f172a", back_color="#f8fafc")
+        img = qr.make_image(fill_color="#09090b", back_color="#ffffff")
 
         # --- Janela ---
         qr_win = tk.Toplevel(self)
         qr_win.title("Web Tally QR Code")
-        qr_win.configure(bg=BG_COLOR)
+        current_mode = ctk.get_appearance_mode()
+        qr_win.configure(bg="#f4f4f5" if current_mode == "Light" else "#09090b")
         qr_win.resizable(False, False)
         try:
             qr_win.iconbitmap(resource_path("Tally.ico"))
@@ -718,19 +940,20 @@ class TallyApp(ctk.CTk):
         # Mantém referência para evitar garbage collection
         qr_win._qr_img_ref = tk_img
 
-        frame = ctk.CTkFrame(qr_win, fg_color=PANEL_COLOR, corner_radius=12)
+        frame = ctk.CTkFrame(qr_win, fg_color=PANEL_COLOR, border_width=1, border_color=BORDER_COLOR, corner_radius=12)
         frame.pack(padx=20, pady=20)
 
         ctk.CTkLabel(frame, text="Scan to connect",
                     font=ctk.CTkFont(size=14, weight="bold"),
-                    text_color=TEXT_WHITE).pack(pady=(15, 5))
+                    text_color=TEXT_PRIMARY).pack(pady=(15, 5))
 
         lbl_url = ctk.CTkLabel(frame, text=url,
                                 font=ctk.CTkFont(size=12),
                                 text_color=ACCENT_COLOR)
         lbl_url.pack(pady=(0, 10))
 
-        img_label = tk.Label(frame, image=tk_img, bg=PANEL_COLOR, bd=0)
+        img_bg = "#ffffff" if current_mode == "Light" else "#18181b"
+        img_label = tk.Label(frame, image=tk_img, bg=img_bg, bd=0)
         img_label.pack(padx=20, pady=10)
 
         if not self.is_web_server_active:
@@ -749,7 +972,7 @@ class TallyApp(ctk.CTk):
             except Exception:
                 pass
         qr_win.protocol("WM_DELETE_WINDOW", on_qr_close)
-        ctk.CTkButton(frame, text="Close", width=120,command=on_qr_close).pack(pady=(5, 15))
+        ctk.CTkButton(frame, text="Close", width=120, fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff", command=on_qr_close).pack(pady=(5, 15))
         #qr_win.after(100, lambda: (qr_win.lift(), qr_win.focus_force()))
             
 
@@ -808,8 +1031,8 @@ class TallyApp(ctk.CTk):
                         #status { font-size: 15vw; font-weight: 900; text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 5px 25px rgba(0,0,0,0.8); pointer-events: none; }
                         .prog { background: #dc2626 !important; box-shadow: inset 0 0 100px rgba(0,0,0,0.5); }
                         .prev { background: #16a34a !important; color: #fff !important; box-shadow: inset 0 0 100px rgba(0,0,0,0.5); }
-                        .att { background: #2563eb !important; box-shadow: inset 0 0 100px rgba(0,0,0,0.5); }
-                        .off { background: #0f172a !important; }
+                        .att { background: #1d4ed8 !important; box-shadow: inset 0 0 100px rgba(0,0,0,0.5); }
+                        .off { background: #09090b !important; }
                         
                         /* Floating Action Button */
                         #toggle-config-btn {
@@ -851,9 +1074,9 @@ class TallyApp(ctk.CTk):
                             position: absolute;
                             bottom: calc(90px + env(safe-area-inset-bottom, 0px));
                             right: 20px;
-                            background: rgba(15, 23, 42, 0.9);
+                            background: rgba(18, 18, 20, 0.95);
                             backdrop-filter: blur(15px);
-                            border: 1px solid rgba(255, 255, 255, 0.15);
+                            border: 1px solid rgba(255, 255, 255, 0.12);
                             padding: 24px;
                             border-radius: 24px;
                             display: flex;
@@ -895,9 +1118,9 @@ class TallyApp(ctk.CTk):
                             margin: 5px 0;
                         }
                         select {
-                            background: #1e293b;
+                            background: #18181b;
                             color: white;
-                            border: 1px solid #475569;
+                            border: 1px solid #3f3f46;
                             padding: 12px 15px;
                             font-size: 16px;
                             border-radius: 12px;
@@ -908,7 +1131,7 @@ class TallyApp(ctk.CTk):
                             box-sizing: border-box;
                         }
                         .btn-sync {
-                            background: #3b82f6;
+                            background: #1d4ed8;
                             color: white;
                             border: none;
                             padding: 12px 15px;
@@ -922,11 +1145,11 @@ class TallyApp(ctk.CTk):
                         }
                         .btn-sync:active {
                             transform: scale(0.98);
-                            background: #2563eb;
+                            background: #1e40af;
                         }
                         .hint {
                             font-size: 10px;
-                            color: #64748b;
+                            color: #71717a;
                             text-transform: uppercase;
                             letter-spacing: 1px;
                             margin-top: 5px;
@@ -1109,13 +1332,14 @@ class TallyApp(ctk.CTk):
         win = ctk.CTkToplevel(self)
         win.title("Help & Information")
         win.geometry("500x550")
+        win.configure(fg_color=BG_COLOR)
         win.attributes("-topmost", True)
         try:
             win.after(200, lambda: win.iconbitmap(resource_path("Help.ico")))
         except Exception:
             pass
         
-        ctk.CTkLabel(win, text="❓ Help & Information", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=20)
+        ctk.CTkLabel(win, text="❓ Help & Information", font=ctk.CTkFont(size=22, weight="bold"), text_color=TEXT_PRIMARY).pack(pady=20)
         
         info_txt = (
             "🚀 Scene Matching:\n"
@@ -1129,7 +1353,7 @@ class TallyApp(ctk.CTk):
             "🛡️ Firewall Note:\n"
             "Allow Port 8080 (TCP) and 9910 (UDP) in Windows Firewall\n"
             "for external browsers and tally lights to connect.\n\n"
-            "📝 Aditional notes:\n"
+            "📝 Additional notes:\n"
             "Uses some libraries or parts of some libraries made by: SharkooJ / Kalinchuk / AronHetLam \n"
             "ATEM libraries for Arduino by SKAARHOJ \n"
             "Git Repo: https://github.com/kasperskaarhoj/SKAARHOJ-Open-Engineering \n"
@@ -1138,10 +1362,10 @@ class TallyApp(ctk.CTk):
             "GIT Repo: https://github.com/AronHetLam/ATEM_tally_light_with_ESP8266"
         )
         
-        lbl = ctk.CTkLabel(win, text=info_txt, font=ctk.CTkFont(size=13), justify="left")
+        lbl = ctk.CTkLabel(win, text=info_txt, font=ctk.CTkFont(size=13), justify="left", text_color=TEXT_PRIMARY)
         lbl.pack(pady=10, padx=30)
         
-        ctk.CTkButton(win, text="Got it!", command=win.destroy).pack(pady=30)
+        ctk.CTkButton(win, text="Got it!", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff", command=win.destroy).pack(pady=30)
 
     def toggle_remotedisplay_ui(self):
         if self.var_remotedisplay_mode.get():
@@ -1203,12 +1427,12 @@ class TallyApp(ctk.CTk):
             try:
                 self.server.port = int(self.entry_port.get())
                 self.server.start(); self.is_server_running = True
-                self.btn_toggle_server.configure(text="Stop Server", fg_color="#ef4444")
+                self.btn_toggle_server.configure(text="Stop Server", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
             except Exception as e:
                 print(f"SERVER START ERROR: {e}")
         else:
             self.server.stop(); self.is_server_running = False
-            self.btn_toggle_server.configure(text="Start Server", fg_color=ACCENT_COLOR)
+            self.btn_toggle_server.configure(text="Start Server", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
             # RESET ALL STATUS TO IDLE IMMEDIATELY
             self.update_client_list()
 
@@ -1228,14 +1452,14 @@ class TallyApp(ctk.CTk):
                     return
             
             if self.socketio:
-                self.btn_toggle_web_server.configure(text="Stop Web Tally", fg_color="#ef4444")
+                self.btn_toggle_web_server.configure(text="Stop Web Tally", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
                 t = threading.Thread(target=self.start_web_server, daemon=True)
                 t.start()
                 # Verify status after a short delay
                 self.after(3000, self.check_web_server_active)
         else:
             self.is_web_server_active = False 
-            self.btn_toggle_web_server.configure(text="Start Web Tally", fg_color=ACCENT_COLOR)
+            self.btn_toggle_web_server.configure(text="Start Web Tally", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
             self.lbl_web_status.configure(text="● Web Tally: Stopped", text_color=SUBTEXT_COLOR)
 
     def toggle_vmix(self):
@@ -1244,11 +1468,11 @@ class TallyApp(ctk.CTk):
                 h = self.entry_vmix_host.get(); p = int(self.entry_vmix_port.get() or 8099)
                 self.vmix_client = VmixTallyClient(h, p, self.on_external_update)
                 self.vmix_client.start(); self.is_vmix_connected = True
-                self.btn_vmix_connect.configure(text="Disconnect vMix", fg_color="#ef4444")
+                self.btn_vmix_connect.configure(text="Disconnect vMix", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
             except: pass
         else:
             if self.vmix_client: self.vmix_client.stop()
-            self.is_vmix_connected = False; self.btn_vmix_connect.configure(text="Connect vMix", fg_color=ACCENT_COLOR)
+            self.is_vmix_connected = False; self.btn_vmix_connect.configure(text="Connect vMix", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
 
     def toggle_obs(self):
         if not self.is_obs_connected:
@@ -1259,20 +1483,129 @@ class TallyApp(ctk.CTk):
                                                self.on_external_update,
                                                lambda: self.combo_obs_match.get())
                 self.obs_client.start(); self.is_obs_connected = True
-                self.btn_obs_connect.configure(text="Disconnect OBS", fg_color="#ef4444")
+                self.btn_obs_connect.configure(text="Disconnect OBS", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
             except: pass
         else:
             if self.obs_client: self.obs_client.stop()
-            self.is_obs_connected = False; self.btn_obs_connect.configure(text="Connect OBS", fg_color=ACCENT_COLOR)
+            self.is_obs_connected = False; self.btn_obs_connect.configure(text="Connect OBS", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
 
+
+    def toggle_atem(self):
+        if not self.is_atem_connected:
+            try:
+                h = self.entry_atem_host.get().strip()
+                if not h: return
+                self.atem_client = AtemHardwareClient(h, 9910, self.on_external_update)
+                self.atem_client.start(); self.is_atem_connected = True
+                self.btn_atem_connect.configure(text="Disconnect ATEM", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
+            except Exception as e:
+                print(f"ATEM CONNECT ERROR: {e}")
+        else:
+            if self.atem_client: self.atem_client.stop()
+            self.is_atem_connected = False; self.btn_atem_connect.configure(text="Connect ATEM", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+
+    def toggle_tsl(self):
+        if not self.is_tsl_active:
+            try:
+                h = self.entry_tsl_host.get().strip() or "255.255.255.255"
+                p = int(self.entry_tsl_port.get().strip() or 8900)
+                self.tsl_sender = TslUmdSender(h, p)
+                self.tsl_sender.start(); self.is_tsl_active = True
+                self.btn_tsl_toggle.configure(text="Disable TSL 3.1", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
+                self.broadcast_all_tally()
+            except Exception as e:
+                print(f"TSL START ERROR: {e}")
+        else:
+            if self.tsl_sender: self.tsl_sender.stop()
+            self.is_tsl_active = False; self.btn_tsl_toggle.configure(text="Enable TSL 3.1 (Hollyland)", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+
+    def toggle_roland(self):
+        if not self.is_roland_connected:
+            try:
+                h = self.entry_roland_host.get().strip()
+                p = int(self.entry_roland_port.get().strip() or 8023)
+                if not h: return
+                self.roland_client = RolandTallyClient(h, p, self.on_external_update)
+                self.roland_client.start(); self.is_roland_connected = True
+                self.btn_roland_connect.configure(text="Disconnect Roland", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
+            except Exception as e:
+                print(f"ROLAND CONNECT ERROR: {e}")
+        else:
+            if self.roland_client: self.roland_client.stop()
+            self.is_roland_connected = False; self.btn_roland_connect.configure(text="Connect Roland", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+
+    def toggle_osc(self):
+        if not self.is_osc_active:
+            try:
+                th = self.entry_osc_host.get().strip() or "255.255.255.255"
+                tp = int(self.entry_osc_port.get().strip() or 9000)
+                lp = int(self.entry_osc_listen.get().strip() or 8000)
+                self.osc_bridge = OscTallyBridge(th, tp, lp, self.on_osc_trigger)
+                self.osc_bridge.start(); self.is_osc_active = True
+                self.btn_osc_toggle.configure(text="Disable OSC", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
+                self.broadcast_all_tally()
+            except Exception as e:
+                print(f"OSC START ERROR: {e}")
+        else:
+            if self.osc_bridge: self.osc_bridge.stop()
+            self.is_osc_active = False; self.btn_osc_toggle.configure(text="Enable OSC Bridge", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+
+    def on_osc_trigger(self, address, args):
+        try:
+            parts = address.strip("/").split("/")
+            if len(parts) >= 3 and parts[0].lower() == "tally":
+                cam_idx = int(parts[1]) - 1
+                cmd = parts[2].lower()
+                val = int(args[0]) if args else 1
+                if 0 <= cam_idx < self.current_rows_count:
+                    if cmd in ("program", "prog", "pgm"):
+                        self.set_led1_state(cam_idx, "Prog" if val else "Off")
+                    elif cmd in ("preview", "prev", "pvw"):
+                        self.set_led1_state(cam_idx, "Prev" if val else "Off")
+                    elif cmd in ("off", "clear"):
+                        self.set_led1_state(cam_idx, "Off")
+        except Exception:
+            pass
+
+    def toggle_serial(self):
+        if not self.is_serial_active:
+            try:
+                p = self.combo_serial_port.get().strip()
+                proto = self.combo_serial_proto.get().strip()
+                self.serial_driver = SerialTallyDriver(port=p, protocol=proto)
+                self.serial_driver.start(); self.is_serial_active = True
+                self.btn_serial_toggle.configure(text="Disable USB Serial", fg_color="#dc2626", hover_color="#991b1b", text_color="#ffffff")
+                self.broadcast_all_tally()
+            except Exception as e:
+                print(f"SERIAL START ERROR: {e}")
+        else:
+            if self.serial_driver: self.serial_driver.stop()
+            self.is_serial_active = False; self.btn_serial_toggle.configure(text="Enable USB Serial", fg_color=ACCENT_COLOR, hover_color=ACCENT_HOVER, text_color="#ffffff")
+
+    def toggle_theme_mode(self):
+        current = ctk.get_appearance_mode()
+        new_mode = "Light" if current == "Dark" else "Dark"
+        self.set_theme_mode(new_mode)
+
+    def set_theme_mode(self, mode):
+        ctk.set_appearance_mode(mode)
+        self.var_theme.set(mode)
+        if hasattr(self, 'btn_theme_toggle'):
+            self.btn_theme_toggle.configure(text="☀️ Light" if mode == "Dark" else "🌙 Dark")
+        if hasattr(self, 'combo_theme'):
+            self.combo_theme.set(mode)
+        for i in range(self.current_rows_count):
+            self.update_led1_ui_buttons(i)
+        self.apply_titlebar()
+        self.save_config()
 
     def on_external_update(self, flags):
         for i, f in enumerate(flags):
             if i < self.current_rows_count:
                 v = "Off"
-                if f == 1: v = "Prog"
-                elif f == 2: v = "Prev"
-                elif f == 32: v = "ATT" # 0x20
+                if f == 1 or (f & 0x01): v = "Prog"
+                elif f == 2 or (f & 0x02): v = "Prev"
+                elif f == 32 or (f & 0x20): v = "ATT" # 0x20
                 self.tally_vars_led1[i].set(v)
                 self.update_led1_ui_buttons(i)
         self.trigger_broadcast()
@@ -1296,20 +1629,41 @@ class TallyApp(ctk.CTk):
         if idx >= len(self.tally_btn_led1_off): return
         
         state = self.tally_vars_led1[idx].get()
-        # High-visibility colors for LED states
-        cols = {"Off": "#334155", "Prog": "#ef4444", "Prev": "#10b981", "ATT": "#3b82f6"}
         
-        self.tally_btn_led1_off[idx].configure(fg_color=cols["Off"] if state == "Off" else "#1e293b")
-        self.tally_btn_led1_prog[idx].configure(fg_color=cols["Prog"] if state == "Prog" else "#1e293b")
-        self.tally_btn_led1_prev[idx].configure(fg_color=cols["Prev"] if state == "Prev" else "#1e293b")
-        self.tally_btn_led1_att[idx].configure(fg_color=cols["ATT"] if state == "ATT" else "#1e293b")
+        # Configure Off button
+        if state == "Off":
+            self.tally_btn_led1_off[idx].configure(fg_color=BTN_OFF_ACTIVE, text_color=BTN_OFF_TEXT, hover_color=BTN_INACTIVE_HOVER)
+        else:
+            self.tally_btn_led1_off[idx].configure(fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER)
+
+        # Configure Prog button
+        if state == "Prog":
+            self.tally_btn_led1_prog[idx].configure(fg_color=COLOR_PROG, text_color="#ffffff", hover_color=COLOR_PROG_HOVER)
+        else:
+            self.tally_btn_led1_prog[idx].configure(fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER)
+
+        # Configure Prev button
+        if state == "Prev":
+            self.tally_btn_led1_prev[idx].configure(fg_color=COLOR_PREV, text_color="#ffffff", hover_color=COLOR_PREV_HOVER)
+        else:
+            self.tally_btn_led1_prev[idx].configure(fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER)
+
+        # Configure ATT button
+        if state == "ATT":
+            self.tally_btn_led1_att[idx].configure(fg_color=COLOR_ATT, text_color="#ffffff", hover_color=COLOR_ATT_HOVER)
+        else:
+            self.tally_btn_led1_att[idx].configure(fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER)
 
     def toggle_led2_color(self, idx, color):
         var = {"R": self.tally_vars_led2_r, "G": self.tally_vars_led2_g, "B": self.tally_vars_led2_b}[color][idx]
         var.set(not var.get())
         btn = {"R": self.tally_btn_led2_r, "G": self.tally_btn_led2_g, "B": self.tally_btn_led2_b}[color][idx]
-        col = {"R": "#ef4444", "G": "#10b981", "B": "#3b82f6"}[color]
-        btn.configure(fg_color=col if var.get() else "#334155")
+        active_colors = {"R": (COLOR_PROG, COLOR_PROG_HOVER), "G": (COLOR_PREV, COLOR_PREV_HOVER), "B": (COLOR_ATT, COLOR_ATT_HOVER)}
+        if var.get():
+            act_col, act_hov = active_colors[color]
+            btn.configure(fg_color=act_col, text_color="#ffffff", hover_color=act_hov)
+        else:
+            btn.configure(fg_color=BTN_INACTIVE_BG, text_color=BTN_INACTIVE_TEXT, hover_color=BTN_INACTIVE_HOVER)
         self.broadcast_all_tally()
 
     def broadcast_all_tally(self):
@@ -1317,6 +1671,7 @@ class TallyApp(ctk.CTk):
         self.server.set_tally_sources(120)
         
         batch_data = []
+        tsl_data = []
         # We broadcast all 41 possible camera indices
         for i in range(41):
             f = 0
@@ -1333,6 +1688,9 @@ class TallyApp(ctk.CTk):
                 
                 # FORCE LED2 AUX OVERRIDE (Bit 6 / 0x40)
                 if f & 0x1C: f |= 0x40
+                
+                lbl = self.tally_scene_vars[i].get() if i < len(self.tally_scene_vars) else f"Cam {i+1}"
+                tsl_data.append((i, lbl, (l1 == "Prog"), (l1 == "Prev"), (l1 == "ATT")))
             
             self.server.set_tally_flag(i, f)
             
@@ -1344,6 +1702,18 @@ class TallyApp(ctk.CTk):
             if i < len(self.remotedisplay_display_modes):
                 self.server.set_tally_flag(41 + i, self.remotedisplay_display_modes[i])
                 
+        # Emit TSL UMD 3.1 to Hollyland / Monitors
+        if self.tsl_sender and self.is_tsl_active and tsl_data:
+            self.tsl_sender.send_bulk_tally(tsl_data)
+
+        # Emit OSC Bridge to Companion / Digital Consoles
+        if self.osc_bridge and self.is_osc_active and tsl_data:
+            self.osc_bridge.send_bulk_tally(tsl_data)
+
+        # Emit USB Serial / Hardware Relays
+        if self.serial_driver and self.is_serial_active and tsl_data:
+            self.serial_driver.send_tally_states(tsl_data)
+
         # Emit Batch to Web Tally Clients  
         if self.socketio and self.is_web_server_active and batch_data:
             try:
@@ -1412,12 +1782,12 @@ class TallyApp(ctk.CTk):
             
             # Rebuild the list of web clients
             for sid, target_cam in list(self.web_clients.items()):
-                row = ctk.CTkFrame(self.web_tally_list_f, fg_color="#1e293b", corner_radius=6)
+                row = ctk.CTkFrame(self.web_tally_list_f, fg_color=ROW_BG, border_width=1, border_color=BORDER_COLOR, corner_radius=6)
                 row.pack(fill="x", pady=2)
                 
                 # Show first 8 chars of SID for better identification
                 short_id = sid[:6] if sid else "????"
-                name_lbl = ctk.CTkLabel(row, text=f"Tally SID: {short_id}", font=ctk.CTkFont(size=12, weight="bold"))
+                name_lbl = ctk.CTkLabel(row, text=f"🌐 Tally SID: {short_id}", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_PRIMARY)
                 name_lbl.pack(side="left", padx=10, pady=5)
                 
                 combo = ctk.CTkComboBox(row, values=[f"Cam {i+1}" for i in range(41)], width=100, height=24)
@@ -1513,6 +1883,26 @@ class TallyApp(ctk.CTk):
                 c = json.load(f)
                 self.entry_port.delete(0, "end")
                 self.entry_port.insert(0, c.get("server_port", "9910"))
+                self.entry_atem_host.delete(0, "end")
+                self.entry_atem_host.insert(0, c.get("atem_host", "192.168.10.240"))
+                self.entry_roland_host.delete(0, "end")
+                self.entry_roland_host.insert(0, c.get("roland_host", "192.168.1.100"))
+                self.entry_roland_port.delete(0, "end")
+                self.entry_roland_port.insert(0, str(c.get("roland_port", "8023")))
+                self.entry_tsl_host.delete(0, "end")
+                self.entry_tsl_host.insert(0, c.get("tsl_host", "255.255.255.255"))
+                self.entry_tsl_port.delete(0, "end")
+                self.entry_tsl_port.insert(0, str(c.get("tsl_port", "8900")))
+                self.entry_osc_host.delete(0, "end")
+                self.entry_osc_host.insert(0, c.get("osc_host", "255.255.255.255"))
+                self.entry_osc_port.delete(0, "end")
+                self.entry_osc_port.insert(0, str(c.get("osc_port", "9000")))
+                self.entry_osc_listen.delete(0, "end")
+                self.entry_osc_listen.insert(0, str(c.get("osc_listen", "8000")))
+                if "serial_port" in c:
+                    self.combo_serial_port.set(c.get("serial_port"))
+                if "serial_proto" in c:
+                    self.combo_serial_proto.set(c.get("serial_proto"))
                 self.entry_vmix_host.delete(0, "end")
                 self.entry_vmix_host.insert(0, c.get("vmix_host", ""))
                 self.entry_vmix_port.delete(0, "end")
@@ -1529,18 +1919,35 @@ class TallyApp(ctk.CTk):
                 self.var_auto_server.set(c.get("auto_server", False))
                 self.var_auto_vmix.set(c.get("auto_vmix", False))
                 self.var_auto_obs.set(c.get("auto_obs", False))
+                self.var_auto_atem.set(c.get("auto_atem", False))
+                self.var_auto_tsl.set(c.get("auto_tsl", False))
+                self.var_auto_roland.set(c.get("auto_roland", False))
+                self.var_auto_osc.set(c.get("auto_osc", False))
+                self.var_auto_serial.set(c.get("auto_serial", False))
                 self.var_touch_mode.set(c.get("touch_mode", False))
                 self.var_save_window.set(c.get("save_window", True))
                 self.var_remotedisplay_mode.set(c.get("remotedisplay_mode", False))
                 self.var_auto_web_tally.set(c.get("auto_web_tally", False))
                 self.var_obs_match_type.set(c.get("obs_match_type", "Automatico"))
                 self.combo_obs_match.set(self.var_obs_match_type.get())
+                self.var_theme.set(c.get("theme_mode", "Dark"))
+                ctk.set_appearance_mode(self.var_theme.get())
+                if hasattr(self, 'btn_theme_toggle'):
+                    self.btn_theme_toggle.configure(text="☀️ Light" if self.var_theme.get() == "Dark" else "🌙 Dark")
                 self.toggle_remotedisplay_ui()
                 
                 if self.var_save_window.get():
                     w = c.get("window_w", 1150)
                     h = c.get("window_h", 700)
+                    self.last_w = w
+                    self.last_h = h
                     self.geometry(f"{w}x{h}")
+                    st = c.get("window_state", "normal")
+                    self.window_state = st
+                    if st in ("maximized", "zoomed"):
+                        self.after(50, lambda: self.state("zoomed"))
+                    elif st in ("minimized", "iconic"):
+                        self.after(50, lambda: self.iconify())
                 self.settings_w = c.get("settings_w", 780)
                 self.settings_h = c.get("settings_h", 560)
 
@@ -1599,25 +2006,53 @@ class TallyApp(ctk.CTk):
             self.after(1000, self.send_remotedisplay_command)
         if self.var_auto_vmix.get(): self.toggle_vmix()
         if self.var_auto_obs.get(): self.toggle_obs()
+        if self.var_auto_atem.get(): self.toggle_atem()
+        if self.var_auto_roland.get(): self.toggle_roland()
+        if self.var_auto_tsl.get(): self.toggle_tsl()
+        if self.var_auto_osc.get(): self.toggle_osc()
+        if self.var_auto_serial.get(): self.toggle_serial()
         if self.var_auto_web_tally.get(): self.toggle_web_server()
 
     def save_config(self):
         if not self.var_save_on_exit.get(): return
+        st = "normal"
         try:
-            w = self.winfo_width()
-            h = self.winfo_height()
-            if w > 200 and h > 200:
-                self.last_w = w
-                self.last_h = h
-        except:
+            s = self.state()
+            if s == "zoomed":
+                st = "maximized"
+            elif s == "iconic":
+                st = "minimized"
+            else:
+                st = "normal"
+                w = self.winfo_width()
+                h = self.winfo_height()
+                if w > 200 and h > 200:
+                    self.last_w = w
+                    self.last_h = h
+        except Exception:
             pass
+        self.window_state = st
         cfg = {
             "server_port": self.entry_port.get(),
+            "atem_host": self.entry_atem_host.get(),
+            "roland_host": self.entry_roland_host.get(),
+            "roland_port": self.entry_roland_port.get(),
+            "tsl_host": self.entry_tsl_host.get(),
+            "tsl_port": self.entry_tsl_port.get(),
+            "osc_host": self.entry_osc_host.get(),
+            "osc_port": self.entry_osc_port.get(),
+            "osc_listen": self.entry_osc_listen.get(),
+            "serial_port": self.combo_serial_port.get(),
+            "serial_proto": self.combo_serial_proto.get(),
             "vmix_host": self.entry_vmix_host.get(), "vmix_port": self.entry_vmix_port.get(),
             "obs_host": self.entry_obs_host.get(), "obs_port": self.entry_obs_port.get(), "obs_pass": self.entry_obs_pass.get(),
             "web_port": self.entry_web_port.get(),
+            "theme_mode": self.var_theme.get(),
             "save_on_exit": self.var_save_on_exit.get(), "auto_server": self.var_auto_server.get(),
             "auto_vmix": self.var_auto_vmix.get(), "auto_obs": self.var_auto_obs.get(),
+            "auto_atem": self.var_auto_atem.get(), "auto_roland": self.var_auto_roland.get(),
+            "auto_tsl": self.var_auto_tsl.get(), "auto_osc": self.var_auto_osc.get(),
+            "auto_serial": self.var_auto_serial.get(),
             "auto_web_tally": self.var_auto_web_tally.get(),
             "obs_match_type": self.combo_obs_match.get(),
             "touch_mode": self.var_touch_mode.get(), 
@@ -1627,6 +2062,7 @@ class TallyApp(ctk.CTk):
             "remotedisplay_display_modes": self.remotedisplay_display_modes,
             "remotedisplay_msg": self.entry_remotedisplay_msg.get(),
             "save_window": self.var_save_window.get(),
+            "window_state": self.window_state,
             "window_w": self.last_w,
             "window_h": self.last_h,
             "settings_w": getattr(self, "settings_w", 780),
@@ -1634,7 +2070,18 @@ class TallyApp(ctk.CTk):
             "row_count": self.current_rows_count,
             "scenes": [v.get() for v in self.tally_scene_vars]
         }
-        with open(self.config_file, "w") as f: json.dump(cfg, f, indent=4)
+        temp_config = f"{self.config_file}.{os.getpid()}.tmp"
+        try:
+            with open(temp_config, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=4)
+            os.replace(temp_config, self.config_file)
+        except Exception as e:
+            print(f"Erro ao salvar configuração: {e}")
+            if os.path.exists(temp_config):
+                try:
+                    os.remove(temp_config)
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
     app = TallyApp()

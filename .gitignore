@@ -1,18 +1,25 @@
-# Arquivos Wiki
-wiki/
-# Arquivos Marketing
-marketing/
+# ============================================================
+# ATEMTallyServer (Tally Server Pro) - .gitignore
+# ============================================================
 
-
-# Arquivos Tasks
+# Arquivos de Tasks Internas / Documentação Local
+/IARef/
 Tasks.md
+Tasks*.md
+BRAIN.md
+Brain.md
+/scratch/
+wiki/
+marketing/
 
 # Sistema Operacional
 .DS_Store
 Thumbs.db
+Desktop.ini
 *.swp
 *.bak
 *.tmp
+*~
 
 # IDEs
 .vscode/
@@ -52,14 +59,18 @@ MANIFEST
 *.manifest
 *.spec
 
-# Logs e Dados
+# Logs, Configurações Locais e Variáveis de Ambiente
 *.log
 config.json.local
 settings.json.local
 pip-log.txt
 pip-delete-this-directory.txt
+.env
+.env.*
 
-# Unit test / coverage reports
+# Bancos de dados e testes
+*.db
+*.sqlite
 htmlcov/
 .tox/
 .nox/
@@ -72,3 +83,6 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+
+# Conflitos de Sincronização do Dropbox
+*conflicted copy*

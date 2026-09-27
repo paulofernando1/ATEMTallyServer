@@ -74,17 +74,20 @@ OLED SDA = PIN 14
 
 | Service | Port | Protocol | Usage |
 | :--- | :--- | :--- | :--- |
-| **ATEM Tally** | `9910` | UDP | Main tally communication (Binary Protocol) |
+| **ATEM Tally Server** | `9910` | UDP | Main tally communication for DIY lights (Binary Protocol) |
+| **ATEM Switcher Client**| `9910` | UDP | Input connector for Blackmagic ATEM hardware switchers |
+| **Hollyland / TSL UMD** | `8900` | UDP | Universal TSL 3.1 output for Hollyland Tally & Monitors |
 | **Web UI** | `8080` | TCP | Mobile tally clients (Flask/SocketIO) |
-| **vMix API** | `8099` | TCP | Input state polling (TCP Bridge) |
+| **vMix API** | `8099` | TCP | Input state polling (TCP Bridge, up to 41 inputs) |
 | **OBS WS** | `4455` | TCP | Scene monitoring (WebSocket 5.5+) |
 
 ## 🔥 Key Features (v2.5)
 - **High Capacity:** Supports up to 41 simultaneous Tally lights (hardware or web).
+- **Universal Multi-Protocol:** Supports Blackmagic ATEM, Hollyland Tally (TSL 3.1), vMix, OBS Studio, and WebSockets.
 - **Repeater Mode:** Built-in support for hardware units acting as repeaters.
 - **Smart Logic:** Automatic tally flag merging (Program + Preview + RGB Overrides).
 - **RGB Support:** Experimental RGB LED2 support for specialized lighting requirements.
-- **Persistent Memory:** All scene mappings and port configurations are auto-saved to `config.json`.
+- **Persistent Memory:** All scene mappings, hardware IPs, and port configurations are auto-saved to `config.json`.
 
 ## 📦 Building from Source
 
@@ -97,7 +100,6 @@ To compile the application into a standalone portable `.exe`:
    ```
 ## Pending Features (for v1.2.0)
 - **Neopixels Tests** 
-- **ATEM Hardware Switchers Tests** 
 - **Other Compatible Hardware Switchers Tests**
 - **ESP32 Hardware Compatibility Tests**  
 
