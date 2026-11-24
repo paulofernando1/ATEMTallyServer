@@ -5,7 +5,7 @@
 # It integrates with vMix, OBS Studio, and mobile web browsers.
 #
 # Author: Paulo Fernando
-# Version: 1.0.2
+# Version: 1.2.0
 # ==============================================================================
 
 import customtkinter as ctk
@@ -1154,7 +1154,7 @@ class TallyApp(ctk.CTk):
             
             ctk.CTkFrame(left_inner, fg_color=BORDER_COLOR, height=1).pack(fill="x", padx=10, pady=(10, 5))
 
-            ctk.CTkLabel(left_inner, text="Version: V 1.0.2 Stable\nMax Capacity: up to 41 Tally Lights\n\nDeveloped by: Paulo Fernando", 
+            ctk.CTkLabel(left_inner, text="Version: v1.2.0 Stable\nMax Capacity: up to 41 Tally Lights\n\nDeveloped by: Paulo Fernando", 
                           font=ctk.CTkFont(size=11), text_color=SUBTEXT_COLOR).pack(pady=20)
             # Qrcode button
             ctk.CTkButton(
