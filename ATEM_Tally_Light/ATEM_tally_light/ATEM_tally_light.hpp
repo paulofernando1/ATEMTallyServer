@@ -53,6 +53,8 @@ int getTallyState(uint16_t tallyNo);
 
 int getLedColor(int tallyMode, int tallyNo, bool isLED2);
 void atualizarInterface();
+void atualizarDisplayAguardandoServidor();
+void atualizarDisplayModoAP();
 //Serve setup web page to client, by sending HTML with the correct variables
 void handleRoot();
 

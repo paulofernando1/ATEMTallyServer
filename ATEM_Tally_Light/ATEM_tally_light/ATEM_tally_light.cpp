@@ -64,6 +64,7 @@
 #endif
 
 #include <EEPROM.h>
+#include <new>
 #include <ATEMmin.h>
 #include <TallyServer.h>
 #include <FastLED.h>
@@ -251,6 +252,8 @@ char remoteMessage[25] = "";
 uint8_t lastMsgLen = 0;
 unsigned long lastRepeaterReportMillis = 0;
 unsigned long lastDisplayUpdate = 0;
+IPAddress lastDisplayedLocalIP(0, 0, 0, 0);
+unsigned long lastWaitDisplayMillis = 0;
 int lastTallyState = -1;
 int lastColor1 = -1;
 int lastColor2 = -1;
@@ -264,6 +267,8 @@ int textWidth = 0;
 
 // Prototypes matching .hpp signatures exactly
 void atualizarInterface();
+void atualizarDisplayAguardandoServidor();
+void atualizarDisplayModoAP();
 void changeState(uint8_t stateToChangeTo);
 void setBothLEDs(uint8_t color);
 void setLED1(uint8_t color);
@@ -332,6 +337,11 @@ void setup() {
   EEPROM.begin(sizeof(settings));  //Needed on ESP8266 module, as EEPROM lib works a bit differently than on a regular Arduino
   EEPROM.get(0, settings);
 
+  settings.tallyName[sizeof(settings.tallyName) - 1] = '\0';
+  if ((uint8_t)settings.tallyName[0] == 0xFF) {
+    settings.tallyName[0] = '\0';
+  }
+
   // Safety check for tally number (0-based, 0-40 matches Cam 1-41)
   if (settings.tallyNo > 40) {
     settings.tallyNo = 0;
@@ -343,11 +353,15 @@ void setup() {
   if (settings.blinkTimeLED2 == 0 || settings.blinkTimeLED2 > 60) {
     settings.blinkTimeLED2 = 1;
   }
-  //Ugly fix for IPAddress not loading correctly when read from EEPROM
-  settings.tallyIP = IPAddress(settings.tallyIP[0], settings.tallyIP[1], settings.tallyIP[2], settings.tallyIP[3]);
-  settings.tallySubnetMask = IPAddress(settings.tallySubnetMask[0], settings.tallySubnetMask[1], settings.tallySubnetMask[2], settings.tallySubnetMask[3]);
-  settings.tallyGateway = IPAddress(settings.tallyGateway[0], settings.tallyGateway[1], settings.tallyGateway[2], settings.tallyGateway[3]);
-  settings.switcherIP = IPAddress(settings.switcherIP[0], settings.switcherIP[1], settings.switcherIP[2], settings.switcherIP[3]);
+  // Reconstruct IPAddress vptrs in-place after raw EEPROM.get load
+  uint8_t tIP[4]  = { settings.tallyIP[0], settings.tallyIP[1], settings.tallyIP[2], settings.tallyIP[3] };
+  uint8_t tMsk[4] = { settings.tallySubnetMask[0], settings.tallySubnetMask[1], settings.tallySubnetMask[2], settings.tallySubnetMask[3] };
+  uint8_t tGw[4]  = { settings.tallyGateway[0], settings.tallyGateway[1], settings.tallyGateway[2], settings.tallyGateway[3] };
+  uint8_t sIP[4]  = { settings.switcherIP[0], settings.switcherIP[1], settings.switcherIP[2], settings.switcherIP[3] };
+  new (&settings.tallyIP) IPAddress(tIP[0], tIP[1], tIP[2], tIP[3]);
+  new (&settings.tallySubnetMask) IPAddress(tMsk[0], tMsk[1], tMsk[2], tMsk[3]);
+  new (&settings.tallyGateway) IPAddress(tGw[0], tGw[1], tGw[2], tGw[3]);
+  new (&settings.switcherIP) IPAddress(sIP[0], sIP[1], sIP[2], sIP[3]);
 
   //Initialize LED strip
   if (0 < settings.neopixelsAmount && settings.neopixelsAmount <= 1000) {
@@ -502,10 +516,12 @@ void loop() {
         firstRun = false;
         Serial.println("Unable to connect. Serving \"Tally Light setup\" WiFi for configuration, while still trying to connect...");
         Serial.println("Default IP: 192.168.4.1");
-        WiFi.softAP((String)DISPLAY_NAME + " setup");
         WiFi.mode(WIFI_AP_STA);  // Enable softAP to access web interface in case of no WiFi
+        WiFi.softAP((String)DISPLAY_NAME + " setup");
         setBothLEDs(LED_WHITE);
         setStatusLED(LED_WHITE);
+        yield();
+        atualizarDisplayModoAP();
       }
       break;
 #ifndef TALLY_TEST_SERVER
@@ -519,11 +535,18 @@ void loop() {
         Serial.println("Connecting to switcher...");
         Serial.println((String) "Switcher IP:         " + settings.switcherIP[0] + "." + settings.switcherIP[1] + "." + settings.switcherIP[2] + "." + settings.switcherIP[3]);
         firstRun = false;
+        lastDisplayedLocalIP = WiFi.localIP();
+        lastWaitDisplayMillis = millis();
+        atualizarDisplayAguardandoServidor();
       }
       atemSwitcher.runLoop();
       if (atemSwitcher.isConnected()) {
         changeState(STATE_RUNNING);
         Serial.println("Connected to switcher");
+      } else if (WiFi.localIP() != lastDisplayedLocalIP || (millis() - lastWaitDisplayMillis >= 3000)) {
+        lastDisplayedLocalIP = WiFi.localIP();
+        lastWaitDisplayMillis = millis();
+        atualizarDisplayAguardandoServidor();
       }
       break;
 #endif
@@ -732,6 +755,7 @@ void changeState(uint8_t stateToChangeTo) {
       break;
     case STATE_RUNNING:
       state = STATE_RUNNING;
+      ultimaTelaRenderizada = -1;
       setBothLEDs(LED_GREEN);
       setStatusLED(LED_ORANGE);
       break;
@@ -1268,6 +1292,50 @@ void desenharCabecalho(const char *titulo) {
   u8g2.setFont(u8g2_font_doomalpha04_tr);
   u8g2.drawStr(0, 10, titulo);
   u8g2.drawHLine(0, 14, 128);  // Separator line
+}
+
+void desenharLinhaCompacta(int y, const char *prefix, const char *valor) {
+  char linha[32];
+  snprintf(linha, sizeof(linha), "%s %s", prefix, valor);
+  if (u8g2.getStrWidth(linha) > 128) {
+    snprintf(linha, sizeof(linha), "%s%s", prefix, valor);
+  }
+  u8g2.drawStr(0, y, linha);
+}
+
+void desenharStatusConexao(const char *titulo, const char *prefixIP, const IPAddress &ipLocal) {
+  char ipBuf[16];
+  char srvBuf[16];
+  char camBuf[44];
+  snprintf(ipBuf, sizeof(ipBuf), "%u.%u.%u.%u", ipLocal[0], ipLocal[1], ipLocal[2], ipLocal[3]);
+  snprintf(srvBuf, sizeof(srvBuf), "%u.%u.%u.%u", settings.switcherIP[0], settings.switcherIP[1], settings.switcherIP[2], settings.switcherIP[3]);
+  if (settings.tallyName[0] >= 32 && settings.tallyName[0] <= 126) {
+    snprintf(camBuf, sizeof(camBuf), "CAM %u: %.30s", (unsigned)(settings.tallyNo + 1), settings.tallyName);
+  } else {
+    snprintf(camBuf, sizeof(camBuf), "CAM %u", (unsigned)(settings.tallyNo + 1));
+  }
+
+  yield();
+  u8g2.clearBuffer();
+  desenharCabecalho(titulo);
+  u8g2.setFont(u8g2_font_scrum_tf);
+  desenharLinhaCompacta(25, prefixIP, ipBuf);
+  desenharLinhaCompacta(40, "SRV:", srvBuf);
+  u8g2.drawStr(0, 55, camBuf);
+  u8g2.sendBuffer();
+  yield();
+}
+
+void atualizarDisplayAguardandoServidor() {
+  desenharStatusConexao(
+    "WAIT SERVER",
+    settings.staticIP ? "IP:" : "DHCP:",
+    WiFi.localIP()
+  );
+}
+
+void atualizarDisplayModoAP() {
+  desenharStatusConexao("WIFI SETUP AP", "AP:", WiFi.softAPIP());
 }
 
 //Void's para controle e definição do display I2C
