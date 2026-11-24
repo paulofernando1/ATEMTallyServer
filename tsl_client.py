@@ -22,6 +22,7 @@
 import socket
 import threading
 import time
+import unicodedata
 
 class TslUmdSender:
     def __init__(self, host="255.255.255.255", port=8900):
@@ -61,8 +62,10 @@ class TslUmdSender:
         # Byte 0: Address (0x80 + index, 0-126)
         header = 0x80 | (cam_index & 0x7F)
         
-        # Bytes 1-16: 16-byte ASCII label (padded with spaces)
-        clean_label = (label if label else f"CAM {cam_index + 1}").ljust(16)[:16]
+        # Bytes 1-16: 16-byte ASCII label (normalized & padded with spaces)
+        raw_label = label if label else f"CAM {cam_index + 1}"
+        ascii_label = unicodedata.normalize("NFKD", raw_label).encode("ascii", "ignore").decode("ascii")
+        clean_label = (ascii_label if ascii_label else f"CAM {cam_index + 1}").ljust(16)[:16]
         label_bytes = clean_label.encode("ascii", errors="replace")
         
         # Byte 17: Control Byte (Tally Bits + Brightness)

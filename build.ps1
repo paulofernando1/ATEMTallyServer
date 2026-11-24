@@ -29,20 +29,29 @@ try {
     Set-Location $ExternalTempDir
 
     Write-Host ">>> Running PyInstaller build..."
-    python -m PyInstaller --noconfirm --clean --onefile --windowed `
-        --icon "Tally.ico" `
-        --add-data "static;static" `
-        --add-data "Tally.ico;." `
-        --add-data "Tally.png;." `
-        --add-data "Config.ico;." `
-        --add-data "Config.png;." `
-        --add-data "Help.ico;." `
-        --add-data "Help.png;." `
-        --hidden-import "qrcode" `
-        --hidden-import "qrcode.image.pil" `
-        --hidden-import "PIL._tkinter_finder" `
-        --name "TallyServerPro" `
-        "app.py"
+    $pyInstallerArgs = @(
+        "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
+        "--icon", "Tally.ico",
+        "--add-data", "static;static",
+        "--add-data", "Tally.ico;.",
+        "--add-data", "Tally.png;.",
+        "--add-data", "Config.ico;.",
+        "--add-data", "Config.png;.",
+        "--add-data", "Help.ico;.",
+        "--add-data", "Help.png;.",
+        "--hidden-import", "qrcode",
+        "--hidden-import", "qrcode.image.pil",
+        "--hidden-import", "PIL._tkinter_finder"
+    )
+    python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('serial') else 1)"
+    if ($LASTEXITCODE -eq 0) {
+        $pyInstallerArgs += @("--hidden-import", "serial", "--hidden-import", "serial.tools.list_ports")
+    }
+    $pyInstallerArgs += @("--name", "TallyServerPro", "app.py")
+    & python @pyInstallerArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "PyInstaller failed with exit code $LASTEXITCODE"
+    }
 
     # Copy output executable back to project dist folder
     if (!(Test-Path $DistDir)) {

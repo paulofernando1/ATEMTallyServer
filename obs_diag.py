@@ -1,15 +1,29 @@
 """
 OBS Diagnostic - Check group/scene contents recursively
 """
+import json
+import os
 import obsws_python as obs
 import sys
 
 # Fix encoding for Windows console
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-HOST = "127.0.0.1"
-PORT = 4455
-PASS = "xIC2SuivwblbJ3oN"
+def _load_obs_settings():
+    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    cfg = {}
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception as e:
+            print(f"Warning: could not read config.json: {e}")
+    host = os.environ.get("OBS_HOST", cfg.get("obs_host", "127.0.0.1"))
+    port = int(os.environ.get("OBS_PORT", cfg.get("obs_port", 4455)))
+    password = os.environ.get("OBS_PASS", cfg.get("obs_pass", ""))
+    return host, port, password
+
+HOST, PORT, PASS = _load_obs_settings()
 
 req = obs.ReqClient(host=HOST, port=PORT, password=PASS)
 prog = req.get_current_program_scene()

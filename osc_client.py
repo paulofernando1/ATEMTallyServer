@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Open Sound Control (OSC) Universal Tally Bridge
 # ==============================================================================
 # Bidirectional OSC Bridge for Bitfocus Companion, TouchOSC, Digital Consoles
@@ -75,6 +75,10 @@ def decode_osc_message(data):
                 if s_end != -1:
                     args.append(data[ptr:s_end].decode('ascii', errors='ignore'))
                     ptr = (s_end + 4) & ~0x03
+            elif tag == 'T':
+                args.append(1)
+            elif tag == 'F':
+                args.append(0)
         return address, args
     except Exception:
         return None, []
@@ -108,6 +112,16 @@ class OscTallyBridge:
             self.thread.start()
             print(f"OSC Bridge active -> Send: {self.target_host}:{self.target_port} | Listen: 0.0.0.0:{self.listen_port}")
         except Exception as e:
+            self.running = False
+            with self.lock:
+                for s in (self.send_sock, self.recv_sock):
+                    if s:
+                        try:
+                            s.close()
+                        except Exception:
+                            pass
+                self.send_sock = None
+                self.recv_sock = None
             print(f"OSC Start Error: {e}")
 
     def stop(self):

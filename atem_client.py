@@ -35,11 +35,14 @@ class AtemHardwareClient:
         self.last_recv = 0
         self.last_send = 0
         self.last_flags = []
+        self._stop_event = threading.Event()
 
     def start(self):
         if self.running:
             return
         self.running = True
+        self._stop_event.clear()
+        self.last_flags = []
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
         print(f"ATEM Hardware Client starting for {self.host}:{self.port}")
@@ -47,6 +50,7 @@ class AtemHardwareClient:
     def stop(self):
         self.running = False
         self.is_connected = False
+        self._stop_event.set()
         if self.sock:
             try:
                 self.sock.close()
@@ -107,7 +111,7 @@ class AtemHardwareClient:
                 # --- TlIn: Tally by Index ---
                 if cmd_name == 'TlIn':
                     if ptr + 10 <= total_len:
-                        source_count = (payload[ptr + 8] << 8) | payload[ptr + 9]
+                        source_count = min((payload[ptr + 8] << 8) | payload[ptr + 9], 41)
                         flags = []
                         for i in range(source_count):
                             if ptr + 10 + i < ptr + cmd_len:
@@ -134,9 +138,13 @@ class AtemHardwareClient:
             ptr += cmd_len
 
     def _run_loop(self):
-        while self.running:
+        while self.running and not self._stop_event.is_set():
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                try:
+                    self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+                except Exception:
+                    pass
                 self.sock.settimeout(0.1)
                 self.session_id = 0
                 self.local_packet_id = 0
@@ -148,14 +156,14 @@ class AtemHardwareClient:
                 hello_start = time.time()
                 self.last_recv = time.time()
                 
-                while self.running:
+                while self.running and not self._stop_event.is_set():
                     now = time.time()
                     try:
                         data, addr = self.sock.recvfrom(2048)
                         if addr[0] == self.host and len(data) >= 12:
                             self.last_recv = now
                             flags = data[0] & 0b11111000
-                            packet_len = ((data[0] & 0b00000111) << 8) | data[1]
+                            packet_len = min(((data[0] & 0b00000111) << 8) | data[1], len(data))
                             remote_session = (data[2] << 8) | data[3]
                             remote_packet_id = (data[10] << 8) | data[11]
 
@@ -176,7 +184,7 @@ class AtemHardwareClient:
                                     self._send_ack(remote_packet_id)
 
                                 # Process payload commands
-                                if len(data) > 12:
+                                if packet_len > 12:
                                     self._parse_commands(data[12:packet_len])
 
                     except (socket.timeout, BlockingIOError):
@@ -209,5 +217,5 @@ class AtemHardwareClient:
                         pass
                     self.sock = None
 
-            if self.running:
-                time.sleep(2.0)
+            if self.running and not self._stop_event.is_set():
+                self._stop_event.wait(2.0)

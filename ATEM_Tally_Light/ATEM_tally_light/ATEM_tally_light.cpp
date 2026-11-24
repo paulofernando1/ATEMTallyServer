@@ -252,6 +252,8 @@ uint8_t lastMsgLen = 0;
 unsigned long lastRepeaterReportMillis = 0;
 unsigned long lastDisplayUpdate = 0;
 int lastTallyState = -1;
+int lastColor1 = -1;
+int lastColor2 = -1;
 bool blinkState = true;
 unsigned long lastBlinkMillis = 0;
 
@@ -318,7 +320,9 @@ void setup() {
 
   setBothLEDs(LED_BLUE);
   //Setup current-measuring pin
+#ifdef A0
   pinMode(A0, INPUT);
+#endif
 
   //Start Serial Text
   //Serial.begin(115200);
@@ -388,8 +392,10 @@ void setup() {
   WiFi.mode(WIFI_STA);
 #ifdef ESP32
   WiFi.setHostname(settings.tallyName);
+  WiFi.setSleep(false);
 #else
   WiFi.hostname(settings.tallyName);
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
 #endif
   WiFi.setAutoReconnect(true);
   WiFi.begin();
@@ -447,6 +453,7 @@ void setup() {
       readByte = Serial.read();
       improv.handleByte(readByte);
     }
+    yield();
   }
 
   //Set state to connecting before entering loop
@@ -475,6 +482,11 @@ void loop() {
     case STATE_CONNECTING_TO_WIFI:
       if (WiFi.status() == WL_CONNECTED) {
         WiFi.mode(WIFI_STA);  // Disable softAP if connection is successful
+#ifdef ESP32
+        WiFi.setSleep(false);
+#else
+        WiFi.setSleepMode(WIFI_NONE_SLEEP);
+#endif
         Serial.println("------------------------");
         Serial.println("Connected to WiFi:   " + getSSID());
         Serial.println("IP:                  " + WiFi.localIP().toString());
@@ -590,20 +602,24 @@ void loop() {
       //Set LED and Neopixel colors accordingly
       // --- LED 1 ---
       int color1 = getLedColor(settings.tallyModeLED1, settings.tallyNo, false);
-      setLED1(color1);
+      if (color1 != lastColor1) {
+        setLED1(color1);
+        lastColor1 = color1;
+      }
       setSTRIP(color1);
 
       // --- LED 2 ---
       int color2 = getLedColor(settings.tallyModeLED2, settings.tallyNo, true);
-      setLED2(color2);
+      if (color2 != lastColor2) {
+        setLED2(color2);
+        lastColor2 = color2;
+      }
 
       // --- REMOTE DISPLAY & LOGGING ---
       // Re-mapped to support up to 41 tallys + 41 display modes + message buffer
       // Display Mode is at 41 + settings.tallyNo
       uint8_t newTela = atemSwitcher.getTallyByIndexTallyFlags(41 + settings.tallyNo);
       if (newTela != telaAtiva) {
-        // Serial.print("DISPLAY MODE: ");
-        // Serial.println(newTela);
         telaAtiva = newTela;
         ultimaTelaRenderizada = -1;  // Force immediate refresh
         scrollX = 128;               // Reset scroll position on mode change
@@ -611,16 +627,18 @@ void loop() {
 
       // Read Remote Message (Index 82-105) and Length (Index 106)
       uint8_t msgLen = atemSwitcher.getTallyByIndexTallyFlags(106);
-      if (msgLen > 0 && msgLen != lastMsgLen) {
-        // Serial.print("MSG RECEIVED: ");
+      if (msgLen > 0) {
+        char incomingMsg[25];
         for (int i = 0; i < 24; i++) {
-          remoteMessage[i] = (char)atemSwitcher.getTallyByIndexTallyFlags(82 + i);
+          incomingMsg[i] = (char)atemSwitcher.getTallyByIndexTallyFlags(82 + i);
         }
-        remoteMessage[24] = '\0';
-        // Serial.println(remoteMessage);
-        lastMsgLen = msgLen;
-        ultimaTelaRenderizada = -1;  // Force immediate refresh
-        scrollX = 128;               // Reset scroll position for new message
+        incomingMsg[24] = '\0';
+        if (msgLen != lastMsgLen || memcmp(incomingMsg, remoteMessage, 25) != 0) {
+          memcpy(remoteMessage, incomingMsg, 25);
+          lastMsgLen = msgLen;
+          ultimaTelaRenderizada = -1;  // Force immediate refresh
+          scrollX = 128;               // Reset scroll position for new message
+        }
       }
 
       // --- LOOP STATUS LOGGING (Commented out as requested) ---
@@ -697,6 +715,8 @@ void loop() {
 //Handle the change of states in the program
 void changeState(uint8_t stateToChangeTo) {
   firstRun = true;
+  lastColor1 = -1;
+  lastColor2 = -1;
   switch (stateToChangeTo) {
     case STATE_CONNECTING_TO_WIFI:
       state = STATE_CONNECTING_TO_WIFI;
@@ -722,6 +742,8 @@ void changeState(uint8_t stateToChangeTo) {
 void setBothLEDs(uint8_t color) {
   setLED(color, PIN_RED1, PIN_GREEN1, PIN_BLUE1);
   setLED(color, PIN_RED2, PIN_GREEN2, PIN_BLUE2);
+  lastColor1 = color;
+  lastColor2 = color;
 }
 
 //Set the color of the 1st LED
@@ -736,50 +758,6 @@ void setLED2(uint8_t color) {
 
 //Set the color of a LED using the given pins
 void setLED(uint8_t color, int pinRed, int pinGreen, int pinBlue) {
-#ifdef ESP32
-  switch (color) {
-    case LED_OFF:
-      digitalWrite(pinRed, 0);
-      digitalWrite(pinGreen, 0);
-      digitalWrite(pinBlue, 0);
-      break;
-    case LED_RED:
-      digitalWrite(pinRed, 1);
-      digitalWrite(pinGreen, 0);
-      digitalWrite(pinBlue, 0);
-      break;
-    case LED_GREEN:
-      digitalWrite(pinRed, 0);
-      digitalWrite(pinGreen, 1);
-      digitalWrite(pinBlue, 0);
-      break;
-    case LED_BLUE:
-      digitalWrite(pinRed, 0);
-      digitalWrite(pinGreen, 0);
-      digitalWrite(pinBlue, 1);
-      break;
-    case LED_YELLOW:
-      digitalWrite(pinRed, 1);
-      digitalWrite(pinGreen, 1);
-      digitalWrite(pinBlue, 0);
-      break;
-    case LED_PINK:
-      digitalWrite(pinRed, 1);
-      digitalWrite(pinGreen, 0);
-      digitalWrite(pinBlue, 1);
-      break;
-    case LED_WHITE:
-      digitalWrite(pinRed, 1);
-      digitalWrite(pinGreen, 1);
-      digitalWrite(pinBlue, 1);
-      break;
-    case LED_CYAN:
-      digitalWrite(pinRed, 0);
-      digitalWrite(pinGreen, 1);
-      digitalWrite(pinBlue, 1);
-      break;
-  }
-#else
   uint8_t ledBrightness = settings.ledBrightness;
   void (*writeFunc)(uint8_t, uint8_t);
   if (ledBrightness >= 0xff) {
@@ -831,7 +809,6 @@ void setLED(uint8_t color, int pinRed, int pinGreen, int pinBlue) {
       writeFunc(pinBlue, ledBrightness);
       break;
   }
-#endif
 }
 
 void analogWriteWrapper(uint8_t pin, uint8_t value) {
@@ -932,7 +909,6 @@ int getLedColor(int tallyMode, int tallyNo, bool isLED2) {
   }
 
   // Normalized modes: 1=Normal, 2=Preview stay on, 3=Program only, 4=On Air
-  if (tallyMode == MODE_ON_AIR) return LED_BLUE;
   if (tallyMode == MODE_PROGRAM_ONLY) {
       if (tallyState & TALLY_FLAG_PROGRAM) return LED_RED;
       return LED_OFF;
@@ -959,36 +935,38 @@ int getLedColor(int tallyMode, int tallyNo) {
 //Serve setup web page to client, by sending HTML with the correct variables
 void handleRoot() {
   char buffer[10];
-  String html = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">";
+  String html;
+  html.reserve(6500);
+  html = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">";
   html += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
   html += "<title>" + (String)DISPLAY_NAME + " Settings</title>";
   html += "<style>";
-  html += "body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }";
-  html += ".container { max-width: 600px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }";
-  html += "h1 { color: #3b82f6; font-size: 24px; margin-bottom: 20px; border-bottom: 2px solid #334155; padding-bottom: 10px; }";
-  html += "h2 { color: #60a5fa; font-size: 18px; margin-top: 25px; margin-bottom: 15px; }";
+  html += "body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #09090b; color: #f4f4f5; margin: 0; padding: 20px; }";
+  html += ".container { max-width: 600px; margin: 0 auto; background: #18181b; border: 1px solid #27272a; padding: 30px; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.35); }";
+  html += "h1 { color: #f4f4f5; font-size: 24px; margin-bottom: 20px; border-bottom: 2px solid #27272a; padding-bottom: 10px; }";
+  html += "h2 { color: #d4d4d8; font-size: 18px; margin-top: 25px; margin-bottom: 15px; }";
   html += ".grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; align-items: center; }";
-  html += "label { color: #94a3b8; font-size: 14px; }";
-  html += "input, select { background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 90%; }";
-  html += "input:focus { outline: none; border-color: #3b82f6; }";
-  html += ".btn { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background 0.2s; width: 100%; margin-top: 20px; }";
-  html += ".btn:hover { background: #2563eb; }";
-  html += ".btn-ota { background: #10b981; margin-top: 10px; }";
+  html += "label { color: #a1a1aa; font-size: 14px; }";
+  html += "input, select { background: #09090b; border: 1px solid #27272a; color: #f4f4f5; padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 90%; }";
+  html += "input:focus, select:focus { outline: none; border-color: #f4f4f5; }";
+  html += ".btn { background: #f4f4f5; color: #09090b; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s; width: 100%; margin-top: 20px; }";
+  html += ".btn:hover { background: #d4d4d8; }";
+  html += ".btn-ota { background: #10b981; color: #ffffff; margin-top: 10px; }";
   html += ".btn-ota:hover { background: #059669; }";
-  html += ".info-box { background: #334155; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }";
+  html += ".info-box { background: #121214; border: 1px solid #27272a; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }";
   html += ".status { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }";
   html += ".status-on { background: #059669; color: #ecfdf5; }";
   html += ".status-off { background: #dc2626; color: #fef2f2; }";
-  html += ".card { background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155; margin-bottom: 20px; }";
-  html += ".ota-form { border-top: 2px solid #334155; margin-top: 30px; padding-top: 20px; }";
-  html += ".footer { margin-top: 30px; font-size: 11px; color: #64748b; text-align: center; }";
-  html += ".footer a { color: #3b82f6; text-decoration: none; }";
-  html += ".opt-normal { color: #f8fafc; }";
+  html += ".card { background: #1c1c1f; padding: 20px; border-radius: 8px; border: 1px solid #27272a; margin-bottom: 20px; }";
+  html += ".ota-form { border-top: 2px solid #27272a; margin-top: 30px; padding-top: 20px; }";
+  html += ".footer { margin-top: 30px; font-size: 11px; color: #71717a; text-align: center; }";
+  html += ".footer a { color: #d4d4d8; text-decoration: none; }";
+  html += ".opt-normal { color: #f4f4f5; }";
   html += ".opt-preview { color: #22c55e !important; }";
   html += ".opt-program { color: #ef4444 !important; }";
   html += ".opt-onair { color: #3b82f6 !important; font-weight: bold; }";
   
-  html += "select option { background: #1e293b; }"; 
+  html += "select option { background: #18181b; color: #f4f4f5; }"; 
   
   html += "</style>";
   html += "<script>";
@@ -1019,8 +997,16 @@ void handleRoot() {
   html += "<div><strong>Signal:</strong> " + String(WiFi.RSSI()) + " dBm</div>";
   
   // Calculate battery voltage if hardware supports it (A0)
-  float vBat = (float)analogRead(A0) / 1023.0f * 4.2f;
+#ifdef A0
+  #ifdef ESP32
+    float vBat = (float)analogRead(A0) / 4095.0f * 4.2f;
+  #else
+    float vBat = (float)analogRead(A0) / 1023.0f * 4.2f;
+  #endif
   html += "<div><strong>Battery Voltage:</strong> " + String(vBat) + " V</div>";
+#else
+  html += "<div><strong>Battery Voltage:</strong> N/A</div>";
+#endif
   html += "<div><strong>Static IP:</strong> " + (String)(settings.staticIP ? "True" : "False") + "</div>";
   html += "<div><strong>Firmware Version:</strong> " + (String)VERSION + "</div>";
 
@@ -1128,7 +1114,7 @@ void handleRoot() {
 //Save new settings from client in EEPROM and restart the ESP8266 module
 void handleSave() {
   if (server.method() != HTTP_POST) {
-    server.send(405, "text/html", "<!DOCTYPE html><html><head><meta charset=\"ASCII\"><meta name=\"viewport\"content=\"width=device-width, initial-scale=1.0\"><title>Tally Light setup</title></head><body style=\"font-family:Verdana;\"><table bgcolor=\"#777777\"border=\"0\"width=\"100%\"cellpadding=\"1\"style=\"color:#ffffff;font-size:.8em;\"><tr><td><h1>&nbsp;" + (String)DISPLAY_NAME + " setup</h1></td></tr></table><br>Request without posting settings not allowed</body></html>");
+    server.send(405, "text/html", "<!DOCTYPE html><html><head><meta charset=\"ASCII\"><meta name=\"viewport\"content=\"width=device-width, initial-scale=1.0\"><title>Tally Light setup</title></head><body style=\"font-family:Verdana;background:#09090b;color:#f4f4f5;\"><table bgcolor=\"#18181b\"border=\"0\"width=\"100%\"cellpadding=\"1\"style=\"color:#f4f4f5;font-size:.8em;\"><tr><td><h1>&nbsp;" + (String)DISPLAY_NAME + " setup</h1></td></tr></table><br>Request without posting settings not allowed</body></html>");
   } else {
     String ssid;
     String pwd;
@@ -1207,11 +1193,11 @@ void handleSave() {
 
       String html = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
       html += "<title>Settings Saved</title><style>";
-      html += "body { font-family: 'Segoe UI', sans-serif; background-color: #0f172a; color: white; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }";
-      html += ".card { background: #1e293b; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 10px 15px rgba(0,0,0,0.3); max-width: 400px; }";
+      html += "body { font-family: 'Segoe UI', sans-serif; background-color: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }";
+      html += ".card { background: #18181b; border: 1px solid #27272a; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 10px 15px rgba(0,0,0,0.4); max-width: 400px; }";
       html += "h1 { color: #10b981; margin-bottom: 20px; }";
-      html += ".btn { display: inline-block; background: #3b82f6; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; margin-top: 25px; transition: background 0.2s; }";
-      html += ".btn:hover { background: #2563eb; }";
+      html += ".btn { display: inline-block; background: #f4f4f5; color: #09090b; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 700; margin-top: 25px; transition: background 0.2s; }";
+      html += ".btn:hover { background: #d4d4d8; }";
       html += "</style></head><body><div class=\"card\">";
       html += "<h1>✔️ Settings Saved!</h1>";
       html += "<p>The Tally Light is restarting to apply the new configuration. This may take a few seconds.</p>";
@@ -1263,7 +1249,7 @@ void handlePreview() {
 
 //Send 404 to client in case of invalid webpage being requested.
 void handleNotFound() {
-  server.send(404, "text/html", "<!DOCTYPE html><html><head><meta charset=\"ASCII\"><meta name=\"viewport\"content=\"width=device-width, initial-scale=1.0\"><title>" + (String)DISPLAY_NAME + " setup</title></head><body style=\"font-family:Verdana;\"><table bgcolor=\"#777777\"border=\"0\"width=\"100%\"cellpadding=\"1\"style=\"color:#ffffff;font-size:.8em;\"><tr><td><h1>&nbsp Tally Light setup</h1></td></tr></table><br>404 - Page not found</body></html>");
+  server.send(404, "text/html", "<!DOCTYPE html><html><head><meta charset=\"ASCII\"><meta name=\"viewport\"content=\"width=device-width, initial-scale=1.0\"><title>" + (String)DISPLAY_NAME + " setup</title></head><body style=\"font-family:Verdana;background:#09090b;color:#f4f4f5;\"><table bgcolor=\"#18181b\"border=\"0\"width=\"100%\"cellpadding=\"1\"style=\"color:#f4f4f5;font-size:.8em;\"><tr><td><h1>&nbsp Tally Light setup</h1></td></tr></table><br>404 - Page not found</body></html>");
 }
 
 String getSSID() {
@@ -1302,18 +1288,15 @@ void atualizarInterface() {
       u8g2.drawStr(0, 30, "TALLY PRO READY");
       u8g2.drawStr(0, 45, settings.tallyName);
       u8g2.drawStr(0, 60, "CAM ROLE ACTIVE");
-      Serial.println("Remote Display: ON");
       break;
     case 2:  // Show IP
       desenharCabecalho("IP ADDRESS");
       u8g2.drawStr(0, 40, WiFi.localIP().toString().c_str());
-      Serial.println("Remote Display: ShowIP");
       break;
     case 3:  // Tally Name
       desenharCabecalho("DEVICE NAME");
       u8g2.setFont(u8g2_font_callite24_tr);
       u8g2.drawStr(0, 40, settings.tallyName);
-      Serial.println("Remote Display: Tally Name");
       break;
     case 4:  // WiFi Strength
       
@@ -1331,7 +1314,6 @@ void atualizarInterface() {
         u8g2.drawStr(0, 60, "Weak Signal"); 
       }
 
-      Serial.println("Remote Display: WIFI Signal");
       break;
     case 5:  // ALL
       desenharCabecalho("SYS INFO");
@@ -1340,11 +1322,9 @@ void atualizarInterface() {
       u8g2.drawStr(0, 40, (String("IP:   ") + WiFi.localIP().toString()).c_str());
       u8g2.drawStr(0, 55, (String("RSSI: ") + WiFi.RSSI() + "dBm").c_str());
       //if (lastMsgLen > 0) u8g2.drawStr(0, 58, (String("> ") + remoteMessage).c_str());
-      Serial.println("Remote Display: SYS Info");
       break;
     case 6:  // MESSAGE LARGE + SCROLL
       desenharCabecalho("REMOTE MESSAGE");
-      Serial.println("Remote Display: Message Send");
       u8g2.setFont(u8g2_font_helvB10_tf);
       textWidth = u8g2.getStrWidth(remoteMessage);
 

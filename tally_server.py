@@ -9,6 +9,8 @@
 # - Role-Aware Repeater Reporting (8-byte Clnt records).
 # ==============================================================================
 
+import random
+import select
 import socket
 import threading
 import time
@@ -67,10 +69,18 @@ class TallyServer:
         if self.running:
             return
         self.clients = []
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(("", self.port))
-        self.sock.settimeout(0.01)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("", self.port))
+            sock.setblocking(False)
+        except Exception:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            raise
+        self.sock = sock
         self.running = True
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
@@ -79,9 +89,12 @@ class TallyServer:
     def stop(self):
         self.running = False
         if self.thread:
-            self.thread.join()
+            self.thread.join(timeout=1.5)
         if self.sock:
-            self.sock.close()
+            try:
+                self.sock.close()
+            except Exception:
+                pass
             self.sock = None
         print("TallyServer stopped")
 
@@ -101,6 +114,7 @@ class TallyServer:
         client.local_packet_id_counter = 0
         client.last_remote_packet_id = 0
         client.session_id = 0
+        self.repeater_clients.pop(client.ip, None)
         if self.on_client_update:
             self.on_client_update()
 
@@ -173,114 +187,126 @@ class TallyServer:
         try:
             self.sock.sendto(data, (client.ip, client.port))
             client.last_send = time.time()
-        except:
+        except Exception:
             pass
+
+    def _process_packet(self, data, addr):
+        ip, port = addr
+        packet_size = len(data)
+        if packet_size < 12:
+            return
+        flags = data[0] & 0b11111000
+        packet_len = ((data[0] & 0b00000111) << 8) + data[1]
+        if packet_size < packet_len:
+            return
+
+        client = self._get_client(ip, port)
+        if client:
+            client.session_id = (data[2] << 8) + data[3]
+            remote_packet_id = (data[10] << 8) + data[11]
+            if remote_packet_id > 0:
+                client.last_remote_packet_id = remote_packet_id
+            client.last_recv = time.time()
+
+            # Custom: Parse Repeater Client List (Clnt command)
+            if len(data) >= 20:
+                ptr = 12
+                while ptr + 8 <= len(data):
+                    cmd_len = (data[ptr] << 8) | data[ptr+1]
+                    if cmd_len < 8 or ptr + cmd_len > len(data): break
+                    try:
+                        cmd_name = data[ptr+4:ptr+8].decode('ascii', errors='ignore')
+                        if cmd_name == 'Clnt':
+                            count = data[ptr+9]
+                            ips_with_roles = []
+                            # New Format: 8 bytes per client [IP:4, Role:1, PAD:3]
+                            for i in range(count):
+                                s = ptr + 10 + (i * 8)
+                                if s + 5 <= ptr + cmd_len:
+                                    ip_str = f"{data[s]}.{data[s+1]}.{data[s+2]}.{data[s+3]}"
+                                    role = int(data[s+4])
+                                    ips_with_roles.append((ip_str, role))
+                            self.repeater_clients[client.ip] = ips_with_roles
+                            if self.on_repeater_detected: self.on_repeater_detected(client.ip)
+                            if self.on_client_update: self.on_client_update()
+                    except Exception:
+                        pass
+                    ptr += cmd_len
+
+            if flags & TALLY_SERVER_FLAG_HELLO:
+                client.session_id = random.randint(1, 32767)
+                buf = bytearray(20)
+                buf[0:12] = self._create_header(client, TALLY_SERVER_FLAG_HELLO, 20)
+                buf[12] = TALLY_SERVER_CONNECTION_ACCEPTED
+                self._send_buffer(client, buf)
+                client.is_connected = True
+                if len(data) >= 14:
+                    client.tally_id = data[13]
+
+            elif client.is_initialized:
+                if flags & TALLY_SERVER_FLAG_ACK:
+                    client.last_acked_id = (data[4] << 8) + data[5]
+
+                if flags & TALLY_SERVER_FLAG_ACK_REQUEST:
+                    buf = bytearray(12)
+                    buf[0:12] = self._create_header(client, TALLY_SERVER_FLAG_ACK, 12, remote_packet_id)
+                    self._send_buffer(client, buf)
+
+                if flags & TALLY_SERVER_FLAG_RESEND_REQUEST:
+                    resend_packet_id = ((data[6] << 8) + data[7] + 1) & 0xFFFF
+                    buf = bytearray(TALLY_SERVER_BUFFER_LENGTH)
+                    cmd_len = 12 + self._create_tally_data_cmd(buf)
+                    header = self._create_header(client, TALLY_SERVER_FLAG_RESENT_PACKAGE | TALLY_SERVER_FLAG_ACK | TALLY_SERVER_FLAG_ACK_REQUEST, cmd_len, 0, resend_packet_id)
+                    buf[0:12] = header
+                    self._send_buffer(client, buf[:cmd_len])
+
+            elif client.is_connected:
+                if flags & TALLY_SERVER_FLAG_ACK:
+                    # Initialize and send state
+                    buf = bytearray(TALLY_SERVER_BUFFER_LENGTH)
+                    cmd_len = 12 + self._create_tally_data_cmd(buf)
+                    buf[0:12] = self._create_header(client, TALLY_SERVER_FLAG_ACK_REQUEST, cmd_len)
+                    self._send_buffer(client, buf[:cmd_len])
+
+                    buf2 = bytearray(12)
+                    buf2[0:12] = self._create_header(client, TALLY_SERVER_FLAG_ACK_REQUEST, 12)
+                    self._send_buffer(client, buf2)
+
+                    client.is_initialized = True
+                    if self.on_client_update: self.on_client_update()
+                else:
+                    self._reset_client(client)
+
+        else:
+            # connection rejected
+            if flags & TALLY_SERVER_FLAG_HELLO:
+                dummy = TallyClient(ip, port)
+                buf = bytearray(20)
+                buf[0:12] = self._create_header(dummy, TALLY_SERVER_FLAG_HELLO, 20)
+                buf[12] = TALLY_SERVER_CONNECTION_REJECTED
+                try:
+                    self.sock.sendto(buf, (ip, port))
+                except Exception:
+                    pass
 
     def _run_loop(self):
         while self.running:
             try:
-                data, addr = self.sock.recvfrom(2048)
-                ip, port = addr
-                packet_size = len(data)
-                
-                if packet_size >= 12:
-                    flags = data[0] & 0b11111000
-                    packet_len = ((data[0] & 0b00000111) << 8) + data[1]
-                    
-                    if packet_size >= packet_len:
-                        client = self._get_client(ip, port)
-                        if client:
-                            client.session_id = (data[2] << 8) + data[3]
-                            remote_packet_id = (data[10] << 8) + data[11]
-                            if remote_packet_id > 0:
-                                client.last_remote_packet_id = remote_packet_id
-                            client.last_recv = time.time()
-
-                            # Custom: Parse Repeater Client List (Clnt command)
-                            if len(data) >= 20:
-                                ptr = 12
-                                while ptr + 8 <= len(data):
-                                    cmd_len = (data[ptr] << 8) | data[ptr+1]
-                                    if cmd_len < 8 or ptr + cmd_len > len(data): break
-                                    try:
-                                        cmd_name = data[ptr+4:ptr+8].decode('ascii', errors='ignore')
-                                        if cmd_name == 'Clnt':
-                                            count = data[ptr+9]
-                                            ips_with_roles = []
-                                            # New Format: 8 bytes per client [IP:4, Role:1, PAD:3]
-                                            for i in range(count):
-                                                s = ptr + 10 + (i * 8)
-                                                if s + 5 <= ptr + cmd_len:
-                                                    ip_str = f"{data[s]}.{data[s+1]}.{data[s+2]}.{data[s+3]}"
-                                                    role = int(data[s+4])
-                                                    ips_with_roles.append((ip_str, role))
-                                            self.repeater_clients[client.ip] = ips_with_roles
-                                            if self.on_repeater_detected: self.on_repeater_detected(client.ip)
-                                            if self.on_client_update: self.on_client_update()
-                                    except: pass
-                                    ptr += cmd_len
-
-                            if flags & TALLY_SERVER_FLAG_HELLO:
-                                import random
-                                client.session_id = random.randint(1, 32767)
-                                buf = bytearray(20)
-                                buf[0:12] = self._create_header(client, TALLY_SERVER_FLAG_HELLO, 20)
-                                buf[12] = TALLY_SERVER_CONNECTION_ACCEPTED
-                                self._send_buffer(client, buf)
-                                client.is_connected = True
-                                if len(data) >= 14:
-                                    client.tally_id = data[13]
-
-                            elif client.is_initialized:
-                                if flags & TALLY_SERVER_FLAG_ACK:
-                                    client.last_acked_id = (data[4] << 8) + data[5]
-                                
-                                if flags & TALLY_SERVER_FLAG_ACK_REQUEST:
-                                    buf = bytearray(12)
-                                    buf[0:12] = self._create_header(client, TALLY_SERVER_FLAG_ACK, 12, remote_packet_id)
-                                    self._send_buffer(client, buf)
-
-                                if flags & TALLY_SERVER_FLAG_RESEND_REQUEST:
-                                    resend_packet_id = ((data[6] << 8) + data[7] + 1) & 0xFFFF
-                                    buf = bytearray(TALLY_SERVER_BUFFER_LENGTH)
-                                    cmd_len = 12 + self._create_tally_data_cmd(buf)
-                                    header = self._create_header(client, TALLY_SERVER_FLAG_RESENT_PACKAGE | TALLY_SERVER_FLAG_ACK | TALLY_SERVER_FLAG_ACK_REQUEST, cmd_len, 0, resend_packet_id)
-                                    buf[0:12] = header
-                                    self._send_buffer(client, buf[:cmd_len])
-
-                            elif client.is_connected:
-                                if flags & TALLY_SERVER_FLAG_ACK:
-                                    # Initialize and send state
-                                    buf = bytearray(TALLY_SERVER_BUFFER_LENGTH)
-                                    cmd_len = 12 + self._create_tally_data_cmd(buf)
-                                    buf[0:12] = self._create_header(client, TALLY_SERVER_FLAG_ACK_REQUEST, cmd_len)
-                                    self._send_buffer(client, buf[:cmd_len])
-                                    
-                                    buf2 = bytearray(12)
-                                    buf2[0:12] = self._create_header(client, TALLY_SERVER_FLAG_ACK_REQUEST, 12)
-                                    self._send_buffer(client, buf2)
-
-                                    client.is_initialized = True
-                                    if self.on_client_update: self.on_client_update()
-                                else:
-                                    self._reset_client(client)
-
-                        else:
-                            # connection rejected
-                            if flags & TALLY_SERVER_FLAG_HELLO:
-                                dummy = TallyClient(ip, port)
-                                buf = bytearray(20)
-                                buf[0:12] = self._create_header(dummy, TALLY_SERVER_FLAG_HELLO, 20)
-                                buf[12] = TALLY_SERVER_CONNECTION_REJECTED
-                                try:
-                                    self.sock.sendto(buf, (ip, port))
-                                except:
-                                    pass
-
-            except BlockingIOError:
-                pass
-            except socket.timeout:
-                pass
+                sock = self.sock
+                if not sock:
+                    break
+                wait_timeout = 0.0 if self.tally_flags_changed else 0.01
+                readable, _, _ = select.select([sock], [], [], wait_timeout)
+                if readable:
+                    while self.running:
+                        try:
+                            data, addr = sock.recvfrom(2048)
+                        except (BlockingIOError, socket.timeout):
+                            break
+                        self._process_packet(data, addr)
+            except (OSError, ValueError):
+                if not self.running:
+                    break
             except Exception as e:
                 print("Server loop exception:", e)
 
@@ -328,5 +354,3 @@ class TallyServer:
                         
                     elif (current_time - client.last_recv >= 4.0):
                         self._reset_client(client)
-
-            time.sleep(0.01)
